@@ -73,7 +73,7 @@ function loadState(): GameState {
         crossedOff: fromUrl ?? parsed.crossedOff ?? [],
         favorites: parsed.favorites ?? [],
         lineOverrides: parsed.lineOverrides ?? {},
-        hideNoLineData: parsed.hideNoLineData ?? false,
+        hideNoLineData: parsed.hideNoLineData ?? true,
         stationHistory: parsed.stationHistory ?? [],
       }
     }
@@ -86,7 +86,7 @@ function loadState(): GameState {
     crossedOff: fromUrl ?? [],
     favorites: [],
     lineOverrides: {},
-    hideNoLineData: false,
+    hideNoLineData: true,
     stationHistory: [],
   }
 }
@@ -243,7 +243,7 @@ function createStore() {
     state.actions.splice(0, state.actions.length)
     state.crossedOff.splice(0, state.crossedOff.length)
     Object.keys(state.lineOverrides).forEach((k) => delete state.lineOverrides[k])
-    state.hideNoLineData = false
+    state.hideNoLineData = true
     state.stationHistory.splice(0, state.stationHistory.length)
     state.favorites.splice(0, state.favorites.length)
     persist()
