@@ -7,6 +7,7 @@ import { stations } from '../stations'
 
 const store = useStore()
 const mapEl = ref<HTMLDivElement | null>(null)
+const hideCrossedOff = ref(false)
 let map: maplibregl.Map | null = null
 
 type Status = 'available' | 'crossed-off' | 'filtered-out'
@@ -20,11 +21,13 @@ function stationStatus(name: string): Status {
 function buildGeoJSON(): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
-    features: stations.map((s) => ({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: s.coordinates },
-      properties: { name: s.name, status: stationStatus(s.name) },
-    })),
+    features: stations
+      .filter((s) => !(hideCrossedOff.value && stationStatus(s.name) === 'crossed-off'))
+      .map((s) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: s.coordinates },
+        properties: { name: s.name, status: stationStatus(s.name) },
+      })),
   }
 }
 
@@ -93,7 +96,7 @@ onUnmounted(() => {
   map = null
 })
 
-watch([() => [...store.crossedOff], () => store.filteredStations.value], () => {
+watch([() => [...store.crossedOff], () => store.filteredStations.value, hideCrossedOff], () => {
   const source = map?.getSource('stations') as maplibregl.GeoJSONSource | undefined
   source?.setData(buildGeoJSON())
 })
@@ -102,6 +105,12 @@ watch([() => [...store.crossedOff], () => store.filteredStations.value], () => {
 <template>
   <div class="map-wrapper">
     <div ref="mapEl" class="map-container" />
+    <button
+      :class="['toggle-btn', { active: hideCrossedOff }]"
+      @click="hideCrossedOff = !hideCrossedOff"
+    >
+      {{ hideCrossedOff ? 'Show all' : 'Hide crossed off' }}
+    </button>
   </div>
 </template>
 
@@ -115,5 +124,29 @@ watch([() => [...store.crossedOff], () => store.filteredStations.value], () => {
 .map-container {
   position: absolute;
   inset: 0;
+}
+
+.toggle-btn {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+  z-index: 10;
+}
+
+.toggle-btn.active {
+  background: #0066cc;
+  color: #fff;
+  border-color: #0066cc;
 }
 </style>
