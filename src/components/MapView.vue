@@ -9,6 +9,52 @@ const store = useStore()
 const mapEl = ref<HTMLDivElement | null>(null)
 const hideCrossedOff = ref(false)
 let map: maplibregl.Map | null = null
+let popup: maplibregl.Popup | null = null
+let popupStation: string | null = null
+
+function openPopup(name: string, lngLat: maplibregl.LngLatLike) {
+  if (!map) return
+  popupStation = name
+  popup?.remove()
+  popup = new maplibregl.Popup({ closeButton: true, maxWidth: '240px' })
+    .setLngLat(lngLat)
+    .setHTML(buildPopupHTML(name))
+    .addTo(map)
+  popup.getElement()?.addEventListener('click', onPopupClick)
+}
+
+function buildPopupHTML(name: string): string {
+  const crossed = store.crossedOff.includes(name)
+  const lines = store.getStationLines(name)
+  const linesText = lines.length ? lines.join(', ') : 'no line data'
+  const query = encodeURIComponent(`${name} Bahnhof ZVV`)
+  return `
+    <div class="map-popup">
+      <div class="map-popup-name">${name}</div>
+      <div class="map-popup-lines">${linesText}</div>
+      <label class="map-popup-check">
+        <input type="checkbox" data-action="toggle" ${crossed ? '' : 'checked'} />
+        <span>${crossed ? 'Crossed off' : 'Available'}</span>
+      </label>
+      <a class="map-popup-link" href="https://www.google.com/search?q=${query}" target="_blank" rel="noopener">
+        Search Google
+      </a>
+    </div>
+  `
+}
+
+function onPopupClick(e: Event) {
+  const target = e.target as HTMLElement
+  if (target instanceof HTMLInputElement && target.dataset.action === 'toggle') {
+    if (popupStation) store.toggleStation(popupStation)
+  }
+}
+
+function refreshPopup() {
+  if (!popup || !popupStation) return
+  popup.setHTML(buildPopupHTML(popupStation))
+  popup.getElement()?.addEventListener('click', onPopupClick)
+}
 
 type Status = 'available' | 'crossed-off' | 'filtered-out'
 
@@ -116,7 +162,7 @@ onMounted(() => {
     for (const layer of ['stations-layer', 'favorites-layer']) {
       map.on('click', layer, (e) => {
         const name = e.features?.[0]?.properties?.name
-        if (name) store.toggleStation(name)
+        if (name) openPopup(name, e.lngLat)
       })
       map.on('mouseenter', layer, () => {
         if (map) map.getCanvas().style.cursor = 'pointer'
@@ -129,6 +175,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  popup?.remove()
   map?.remove()
   map = null
 })
@@ -145,6 +192,7 @@ watch(
     ;(map?.getSource('favorites') as maplibregl.GeoJSONSource | undefined)?.setData(
       buildFavGeoJSON(),
     )
+    refreshPopup()
   },
 )
 </script>
@@ -195,5 +243,51 @@ watch(
   background: #0066cc;
   color: #fff;
   border-color: #0066cc;
+}
+</style>
+
+<style>
+.map-popup {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  padding: 4px 2px;
+}
+
+.map-popup-name {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.map-popup-lines {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 10px;
+}
+
+.map-popup-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.map-popup-check input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: #0066cc;
+  cursor: pointer;
+}
+
+.map-popup-link {
+  display: block;
+  font-size: 13px;
+  color: #0066cc;
+  text-decoration: none;
+}
+
+.map-popup-link:hover {
+  text-decoration: underline;
 }
 </style>
