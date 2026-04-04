@@ -16,6 +16,7 @@ export interface GameAction {
 interface GameState {
   actions: GameAction[]
   activeTab: TabId
+  crossedOff: string[]
 }
 
 const STORAGE_KEY = 'hide-and-seek-zurich'
@@ -28,18 +29,23 @@ function loadState(): GameState {
       return {
         actions: parsed.actions ?? [],
         activeTab: parsed.activeTab ?? 'stations',
+        crossedOff: parsed.crossedOff ?? [],
       }
     }
   } catch {
     // corrupted storage — start fresh
   }
-  return { actions: [], activeTab: 'stations' }
+  return { actions: [], activeTab: 'stations', crossedOff: [] }
 }
 
 function saveState(state: GameState) {
   localStorage.setItem(
     STORAGE_KEY,
-    JSON.stringify({ actions: state.actions, activeTab: state.activeTab }),
+    JSON.stringify({
+      actions: state.actions,
+      activeTab: state.activeTab,
+      crossedOff: state.crossedOff,
+    }),
   )
 }
 
@@ -102,8 +108,19 @@ function createStore() {
     }
   }
 
+  function toggleStation(name: string) {
+    const idx = state.crossedOff.indexOf(name)
+    if (idx === -1) {
+      state.crossedOff.push(name)
+    } else {
+      state.crossedOff.splice(idx, 1)
+    }
+    persist()
+  }
+
   function resetAll() {
     state.actions.splice(0, state.actions.length)
+    state.crossedOff.splice(0, state.crossedOff.length)
     persist()
   }
 
@@ -122,7 +139,11 @@ function createStore() {
     get activeTab() {
       return state.activeTab
     },
+    get crossedOff() {
+      return state.crossedOff
+    },
     addAction,
+    toggleStation,
     toggleAction,
     removeAction,
     resetAll,

@@ -1,43 +1,34 @@
 # TODO
 
-## Core features
+## Station list
 
-- Map tab — display stations on an interactive map (Leaflet or MapLibre GL), color-code remaining vs eliminated
-- Station detail view — tap a station to see its lines, coordinates, elimination status
+- Per-station action button to add/remove train lines from that station
+- Filter by name character count (spaces and dashes count as characters)
+- History tab shows check/uncheck actions (what was crossed off and restored)
 
-## Filters
+## Actions tab
 
-- Filter by station name length (e.g., "name has exactly 8 characters")
-- Filter by position in name (e.g., "3rd character is 'r'")
-- Filter by number of lines serving the station
-- Combine character filters with AND/OR logic
+- Check all / uncheck all shortcut buttons
 
-## History improvements
+## Map
 
-- Drag to reorder actions (changes the filter application order)
-- Bulk toggle — enable/disable all actions at once
-- Export/import action history as JSON (share a game state)
+- Display stations on an interactive map (Leaflet or MapLibre GL), color-code available vs crossed off
 
-## Admin — station data management
+## Station data
 
-- Edit train lines: for each line, show all stations as checkboxes; add stations via search box, remove by unchecking
-- Remove stations from the dataset entirely (e.g., duplicates like "Au" vs "Au ZH", non-S-Bahn stops)
-- Add custom stations or lines not in the OSM data
-- Persist admin edits to localStorage separately from game state
+- Resolve remaining stations with `lines: []` (Dolderbahn, Dietikon AVA, naming variants)
+- Identify missing S-Bahn lines in the S2-S43 range not yet in the dataset
 
 ## Game mode
 
 - "New game" flow — randomly pick a secret station, track guesses, show win state
 - Multiplayer: one device picks the station, another device guesses (share via URL or QR code)
-- Guess counter and timer
 
 ## UX polish
 
 - Dark mode
 - Animations for station list changes (Vue transition-group)
-- Haptic feedback on mobile actions
 - PWA manifest + service worker for offline use
-- Keyboard shortcuts for desktop use
 
 ## Deployment
 
