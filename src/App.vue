@@ -4,16 +4,18 @@ import StationList from './components/StationList.vue'
 import HistoryList from './components/HistoryList.vue'
 import ActionsTab from './components/ActionsTab.vue'
 import MapView from './components/MapView.vue'
+import LinksTab from './components/LinksTab.vue'
 
 const store = useStore()
 
-type Tab = 'map' | 'stations' | 'history' | 'actions'
+type Tab = 'map' | 'stations' | 'history' | 'actions' | 'links'
 
 const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'map', label: 'Map', icon: '\uD83D\uDDFA\uFE0F' },
   { id: 'stations', label: 'Stations', icon: '\uD83D\uDE89' },
   { id: 'history', label: 'History', icon: '\uD83D\uDCDC' },
   { id: 'actions', label: 'Admin', icon: '\u2699\uFE0F' },
+  { id: 'links', label: 'Links', icon: '\uD83D\uDD17' },
 ]
 </script>
 
@@ -31,6 +33,7 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
       <StationList v-else-if="store.activeTab === 'stations'" />
       <HistoryList v-else-if="store.activeTab === 'history'" />
       <ActionsTab v-else-if="store.activeTab === 'actions'" />
+      <LinksTab v-else-if="store.activeTab === 'links'" />
     </main>
 
     <nav class="tab-bar">
