@@ -3,6 +3,7 @@ import { useStore } from './store'
 import StationList from './components/StationList.vue'
 import HistoryList from './components/HistoryList.vue'
 import ActionsTab from './components/ActionsTab.vue'
+import MapView from './components/MapView.vue'
 
 const store = useStore()
 
@@ -25,13 +26,8 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
       >
     </header>
 
-    <main class="content">
-      <div v-if="store.activeTab === 'map'" class="tab-content">
-        <div class="placeholder">
-          <span class="placeholder-icon">\uD83D\uDDFA\uFE0F</span>
-          <p>Map coming soon</p>
-        </div>
-      </div>
+    <main :class="['content', { 'map-active': store.activeTab === 'map' }]">
+      <MapView v-if="store.activeTab === 'map'" />
       <StationList v-else-if="store.activeTab === 'stations'" />
       <HistoryList v-else-if="store.activeTab === 'history'" />
       <ActionsTab v-else-if="store.activeTab === 'actions'" />
@@ -102,6 +98,11 @@ body {
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  position: relative;
+}
+
+.content.map-active {
+  overflow: hidden;
 }
 
 .placeholder {
