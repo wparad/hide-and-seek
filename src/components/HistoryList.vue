@@ -1,7 +1,18 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useStore } from '../store'
+import type { GameAction } from '../store'
+import type { StationEvent } from '../store'
 
 const store = useStore()
+
+type HistoryEntry = { kind: 'action'; item: GameAction } | { kind: 'station'; item: StationEvent }
+
+const entries = computed((): HistoryEntry[] => {
+  const actions: HistoryEntry[] = store.actions.map((a) => ({ kind: 'action', item: a }))
+  const events: HistoryEntry[] = store.stationHistory.map((e) => ({ kind: 'station', item: e }))
+  return [...actions, ...events].sort((a, b) => b.item.createdAt - a.item.createdAt)
+})
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -10,30 +21,52 @@ function formatTime(ts: number): string {
 
 <template>
   <div class="history-list">
-    <div
-      v-for="action in store.actions"
-      :key="action.id"
-      :class="['history-item', { disabled: !action.enabled }]"
-    >
-      <label class="history-label">
-        <input
-          type="checkbox"
-          :checked="action.enabled"
-          class="history-checkbox"
-          @change="store.toggleAction(action.id)"
-        />
+    <template v-for="entry in entries" :key="entry.item.id">
+      <!-- Filter action -->
+      <div
+        v-if="entry.kind === 'action'"
+        :class="['history-item', { disabled: !entry.item.enabled }]"
+      >
+        <label class="history-label">
+          <input
+            type="checkbox"
+            :checked="entry.item.enabled"
+            class="history-checkbox"
+            @change="store.toggleAction(entry.item.id)"
+          />
+          <div class="history-info">
+            <span class="history-desc">{{ entry.item.description }}</span>
+            <span class="history-time">{{ formatTime(entry.item.createdAt) }}</span>
+          </div>
+        </label>
+        <button class="history-remove" @click="store.removeAction(entry.item.id)" title="Remove">
+          &times;
+        </button>
+      </div>
+
+      <!-- Station check/uncheck event -->
+      <div v-else class="history-item station-event">
+        <div class="station-event-icon">{{ entry.item.type === 'cross-off' ? '✓' : '↩' }}</div>
         <div class="history-info">
-          <span class="history-desc">{{ action.description }}</span>
-          <span class="history-time">{{ formatTime(action.createdAt) }}</span>
+          <span class="history-desc">{{ entry.item.name }}</span>
+          <span class="history-time">
+            {{ entry.item.type === 'cross-off' ? 'crossed off' : 'restored' }} ·
+            {{ formatTime(entry.item.createdAt) }}
+          </span>
         </div>
-      </label>
-      <button class="history-remove" @click="store.removeAction(action.id)" title="Remove">
-        &times;
-      </button>
-    </div>
-    <div v-if="store.actions.length === 0" class="empty">
-      <p>No actions yet.</p>
-      <p class="empty-hint">Go to the Actions tab to start eliminating stations.</p>
+        <button
+          class="history-remove"
+          @click="store.removeStationEvent(entry.item.id)"
+          title="Remove"
+        >
+          &times;
+        </button>
+      </div>
+    </template>
+
+    <div v-if="entries.length === 0" class="empty">
+      <p>No history yet.</p>
+      <p class="empty-hint">Cross off stations or add filters to see history here.</p>
     </div>
   </div>
 </template>
@@ -113,5 +146,22 @@ function formatTime(ts: number): string {
 .empty-hint {
   font-size: 13px;
   margin-top: 8px;
+}
+
+.station-event {
+  background: #fafafa;
+}
+
+.station-event-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0066cc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
 }
 </style>

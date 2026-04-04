@@ -13,12 +13,20 @@ export interface GameAction {
   createdAt: number
 }
 
+export interface StationEvent {
+  id: string
+  name: string
+  type: 'cross-off' | 'restore'
+  createdAt: number
+}
+
 interface GameState {
   actions: GameAction[]
   activeTab: TabId
   crossedOff: string[]
   lineOverrides: Record<string, string[]>
   hideNoLineData: boolean
+  stationHistory: StationEvent[]
 }
 
 const STORAGE_KEY = 'hide-and-seek-zurich'
@@ -34,6 +42,7 @@ function loadState(): GameState {
         crossedOff: parsed.crossedOff ?? [],
         lineOverrides: parsed.lineOverrides ?? {},
         hideNoLineData: parsed.hideNoLineData ?? false,
+        stationHistory: parsed.stationHistory ?? [],
       }
     }
   } catch {
@@ -45,6 +54,7 @@ function loadState(): GameState {
     crossedOff: [],
     lineOverrides: {},
     hideNoLineData: false,
+    stationHistory: [],
   }
 }
 
@@ -57,6 +67,7 @@ function saveState(state: GameState) {
       crossedOff: state.crossedOff,
       lineOverrides: state.lineOverrides,
       hideNoLineData: state.hideNoLineData,
+      stationHistory: state.stationHistory,
     }),
   )
 }
@@ -128,11 +139,19 @@ function createStore() {
 
   function toggleStation(name: string) {
     const idx = state.crossedOff.indexOf(name)
+    const type: StationEvent['type'] = idx === -1 ? 'cross-off' : 'restore'
     if (idx === -1) {
       state.crossedOff.push(name)
     } else {
       state.crossedOff.splice(idx, 1)
     }
+    state.stationHistory.push({ id: crypto.randomUUID(), name, type, createdAt: Date.now() })
+    persist()
+  }
+
+  function removeStationEvent(id: string) {
+    const idx = state.stationHistory.findIndex((e) => e.id === id)
+    if (idx !== -1) state.stationHistory.splice(idx, 1)
     persist()
   }
 
@@ -155,6 +174,7 @@ function createStore() {
     state.crossedOff.splice(0, state.crossedOff.length)
     Object.keys(state.lineOverrides).forEach((k) => delete state.lineOverrides[k])
     state.hideNoLineData = false
+    state.stationHistory.splice(0, state.stationHistory.length)
     persist()
   }
 
@@ -179,11 +199,15 @@ function createStore() {
     get hideNoLineData() {
       return state.hideNoLineData
     },
+    get stationHistory() {
+      return state.stationHistory
+    },
     addAction,
     setStationLines,
     getStationLines,
     toggleHideNoLineData,
     toggleStation,
+    removeStationEvent,
     toggleAction,
     removeAction,
     resetAll,
