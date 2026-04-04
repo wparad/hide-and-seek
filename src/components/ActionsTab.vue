@@ -6,6 +6,10 @@ const store = useStore()
 
 const showResetConfirm = ref(false)
 
+function checkAll() {
+  store.crossOffAll(store.filteredStations.value.map((s) => s.name))
+}
+
 function confirmReset() {
   store.resetAll()
   showResetConfirm.value = false
@@ -23,6 +27,13 @@ function confirmReset() {
         />
         <span>Hide stations with no line data</span>
       </label>
+    </section>
+
+    <section class="action-section">
+      <div class="btn-row">
+        <button class="action-btn" @click="checkAll">Check all</button>
+        <button class="action-btn secondary-btn" @click="store.restoreAll()">Uncheck all</button>
+      </div>
     </section>
 
     <section class="action-section danger-section">
@@ -74,6 +85,37 @@ function confirmReset() {
   margin-top: 40px;
   padding-top: 20px;
   border-top: 1px solid #e0e0e0;
+}
+
+.btn-row {
+  display: flex;
+  gap: 12px;
+}
+
+.action-btn {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  background: #0066cc;
+  color: #fff;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.action-btn:active {
+  background: #0052a3;
+}
+
+.secondary-btn {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.secondary-btn:active {
+  background: #e0e0e0;
 }
 
 .danger-btn {

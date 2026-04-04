@@ -149,6 +149,31 @@ function createStore() {
     persist()
   }
 
+  function crossOffAll(names: string[]) {
+    const now = Date.now()
+    for (const name of names) {
+      if (!state.crossedOff.includes(name)) {
+        state.crossedOff.push(name)
+        state.stationHistory.push({
+          id: crypto.randomUUID(),
+          name,
+          type: 'cross-off',
+          createdAt: now,
+        })
+      }
+    }
+    persist()
+  }
+
+  function restoreAll() {
+    const now = Date.now()
+    for (const name of [...state.crossedOff]) {
+      state.stationHistory.push({ id: crypto.randomUUID(), name, type: 'restore', createdAt: now })
+    }
+    state.crossedOff.splice(0, state.crossedOff.length)
+    persist()
+  }
+
   function removeStationEvent(id: string) {
     const idx = state.stationHistory.findIndex((e) => e.id === id)
     if (idx !== -1) state.stationHistory.splice(idx, 1)
@@ -207,6 +232,8 @@ function createStore() {
     getStationLines,
     toggleHideNoLineData,
     toggleStation,
+    crossOffAll,
+    restoreAll,
     removeStationEvent,
     toggleAction,
     removeAction,
