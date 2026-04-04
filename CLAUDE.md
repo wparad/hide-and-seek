@@ -12,7 +12,7 @@ Deployed to GitHub Pages from `dist/`.
 
 | Command | What |
 |---------|------|
-| `npm run dev` | Vite dev server |
+| `npm run start` | Vite dev server (port 8080) |
 | `npm run build` | Type-check + production build |
 | `npm run check` | Type-check + ESLint + Prettier |
 | `npm run test` | Vitest |

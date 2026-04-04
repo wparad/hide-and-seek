@@ -4,4 +4,7 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   plugins: [vue()],
   base: '/hide-and-seek/',
+  server: {
+    port: 8080,
+  },
 })

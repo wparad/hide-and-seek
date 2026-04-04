@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "start": "vite --port 8080",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "check": "vue-tsc --noEmit && eslint src/ && prettier --check src/",
