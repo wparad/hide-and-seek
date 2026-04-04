@@ -31,7 +31,37 @@ interface GameState {
 
 const STORAGE_KEY = 'hide-and-seek-zurich'
 
+// Ordinal ID = index in the stations array
+function namesToIds(names: string[]): number[] {
+  return names.map((name) => stations.findIndex((s) => s.name === name)).filter((i) => i !== -1)
+}
+
+function idsToNames(ids: number[]): string[] {
+  return ids.map((i) => stations[i]?.name).filter(Boolean) as string[]
+}
+
+function crossedOffFromUrl(): string[] | null {
+  const param = new URLSearchParams(window.location.search).get('c')
+  if (!param) return null
+  const ids = param
+    .split(',')
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n >= 0 && n < stations.length)
+  return idsToNames(ids)
+}
+
+function syncUrl(crossedOff: string[]) {
+  const url = new URL(window.location.href)
+  if (crossedOff.length === 0) {
+    url.searchParams.delete('c')
+  } else {
+    url.searchParams.set('c', namesToIds(crossedOff).join(','))
+  }
+  history.replaceState(null, '', url)
+}
+
 function loadState(): GameState {
+  const fromUrl = crossedOffFromUrl()
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
@@ -39,7 +69,7 @@ function loadState(): GameState {
       return {
         actions: parsed.actions ?? [],
         activeTab: parsed.activeTab ?? 'stations',
-        crossedOff: parsed.crossedOff ?? [],
+        crossedOff: fromUrl ?? parsed.crossedOff ?? [],
         lineOverrides: parsed.lineOverrides ?? {},
         hideNoLineData: parsed.hideNoLineData ?? false,
         stationHistory: parsed.stationHistory ?? [],
@@ -51,7 +81,7 @@ function loadState(): GameState {
   return {
     actions: [],
     activeTab: 'stations',
-    crossedOff: [],
+    crossedOff: fromUrl ?? [],
     lineOverrides: {},
     hideNoLineData: false,
     stationHistory: [],
@@ -109,6 +139,7 @@ function createStore() {
 
   function persist() {
     saveState(state)
+    syncUrl(state.crossedOff)
   }
 
   function addAction(action: Omit<GameAction, 'id' | 'enabled' | 'createdAt'>) {
