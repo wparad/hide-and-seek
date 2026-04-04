@@ -25,12 +25,16 @@ function openPopup(name: string, lngLat: maplibregl.LngLatLike) {
 
 function buildPopupHTML(name: string): string {
   const crossed = store.crossedOff.includes(name)
+  const fav = store.favorites.includes(name)
   const lines = store.getStationLines(name)
   const linesText = lines.length ? lines.join(', ') : 'no line data'
   const query = encodeURIComponent(`${name} Bahnhof ZVV`)
   return `
     <div class="map-popup">
-      <div class="map-popup-name">${name}</div>
+      <div class="map-popup-header">
+        <div class="map-popup-name">${name}</div>
+        <button class="map-popup-fav${fav ? ' active' : ''}" data-action="favorite">${fav ? '★' : '☆'}</button>
+      </div>
       <div class="map-popup-lines">${linesText}</div>
       <label class="map-popup-check">
         <input type="checkbox" data-action="toggle" ${crossed ? '' : 'checked'} />
@@ -45,9 +49,8 @@ function buildPopupHTML(name: string): string {
 
 function onPopupClick(e: Event) {
   const target = e.target as HTMLElement
-  if (target instanceof HTMLInputElement && target.dataset.action === 'toggle') {
-    if (popupStation) store.toggleStation(popupStation)
-  }
+  if (target.dataset.action === 'toggle' && popupStation) store.toggleStation(popupStation)
+  if (target.dataset.action === 'favorite' && popupStation) store.toggleFavorite(popupStation)
 }
 
 function refreshPopup() {
@@ -252,10 +255,32 @@ watch(
   padding: 4px 2px;
 }
 
+.map-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
 .map-popup-name {
   font-size: 15px;
   font-weight: 700;
-  margin-bottom: 4px;
+}
+
+.map-popup-fav {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: #ccc;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.map-popup-fav.active {
+  color: #f59e0b;
 }
 
 .map-popup-lines {
