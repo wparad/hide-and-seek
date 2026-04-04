@@ -24,6 +24,7 @@ interface GameState {
   actions: GameAction[]
   activeTab: TabId
   crossedOff: string[]
+  favorites: string[]
   lineOverrides: Record<string, string[]>
   hideNoLineData: boolean
   stationHistory: StationEvent[]
@@ -70,6 +71,7 @@ function loadState(): GameState {
         actions: parsed.actions ?? [],
         activeTab: parsed.activeTab ?? 'stations',
         crossedOff: fromUrl ?? parsed.crossedOff ?? [],
+        favorites: parsed.favorites ?? [],
         lineOverrides: parsed.lineOverrides ?? {},
         hideNoLineData: parsed.hideNoLineData ?? false,
         stationHistory: parsed.stationHistory ?? [],
@@ -82,6 +84,7 @@ function loadState(): GameState {
     actions: [],
     activeTab: 'stations',
     crossedOff: fromUrl ?? [],
+    favorites: [],
     lineOverrides: {},
     hideNoLineData: false,
     stationHistory: [],
@@ -95,6 +98,7 @@ function saveState(state: GameState) {
       actions: state.actions,
       activeTab: state.activeTab,
       crossedOff: state.crossedOff,
+      favorites: state.favorites,
       lineOverrides: state.lineOverrides,
       hideNoLineData: state.hideNoLineData,
       stationHistory: state.stationHistory,
@@ -220,6 +224,16 @@ function createStore() {
     return state.lineOverrides[name] ?? stations.find((s) => s.name === name)?.lines ?? []
   }
 
+  function toggleFavorite(name: string) {
+    const idx = state.favorites.indexOf(name)
+    if (idx === -1) {
+      state.favorites.push(name)
+    } else {
+      state.favorites.splice(idx, 1)
+    }
+    persist()
+  }
+
   function toggleHideNoLineData() {
     state.hideNoLineData = !state.hideNoLineData
     persist()
@@ -231,6 +245,7 @@ function createStore() {
     Object.keys(state.lineOverrides).forEach((k) => delete state.lineOverrides[k])
     state.hideNoLineData = false
     state.stationHistory.splice(0, state.stationHistory.length)
+    state.favorites.splice(0, state.favorites.length)
     persist()
   }
 
@@ -252,6 +267,9 @@ function createStore() {
     get crossedOff() {
       return state.crossedOff
     },
+    get favorites() {
+      return state.favorites
+    },
     get hideNoLineData() {
       return state.hideNoLineData
     },
@@ -261,6 +279,7 @@ function createStore() {
     addAction,
     setStationLines,
     getStationLines,
+    toggleFavorite,
     toggleHideNoLineData,
     toggleStation,
     crossOffAll,

@@ -22,6 +22,21 @@ function buildGeoJSON(): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
     features: stations
+      .filter((s) => !store.favorites.includes(s.name))
+      .filter((s) => !(hideCrossedOff.value && stationStatus(s.name) === 'crossed-off'))
+      .map((s) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: s.coordinates },
+        properties: { name: s.name, status: stationStatus(s.name) },
+      })),
+  }
+}
+
+function buildFavGeoJSON(): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: stations
+      .filter((s) => store.favorites.includes(s.name))
       .filter((s) => !(hideCrossedOff.value && stationStatus(s.name) === 'crossed-off'))
       .map((s) => ({
         type: 'Feature',
@@ -47,6 +62,17 @@ onMounted(() => {
     if (!map) return
 
     map.addSource('stations', { type: 'geojson', data: buildGeoJSON() })
+    map.addSource('favorites', { type: 'geojson', data: buildFavGeoJSON() })
+
+    const statusColor: maplibregl.ExpressionSpecification = [
+      'match',
+      ['get', 'status'],
+      'available',
+      '#22c55e',
+      'crossed-off',
+      '#ef4444',
+      '#9ca3af',
+    ]
 
     map.addLayer({
       id: 'stations-layer',
@@ -54,15 +80,7 @@ onMounted(() => {
       source: 'stations',
       paint: {
         'circle-radius': ['match', ['get', 'status'], 'filtered-out', 5, 8],
-        'circle-color': [
-          'match',
-          ['get', 'status'],
-          'available',
-          '#22c55e',
-          'crossed-off',
-          '#ef4444',
-          '#9ca3af',
-        ],
+        'circle-color': statusColor,
         'circle-stroke-width': 1.5,
         'circle-stroke-color': [
           'match',
@@ -77,17 +95,36 @@ onMounted(() => {
       },
     })
 
-    map.on('click', 'stations-layer', (e) => {
-      const name = e.features?.[0]?.properties?.name
-      if (name) store.toggleStation(name)
+    map.addLayer({
+      id: 'favorites-layer',
+      type: 'symbol',
+      source: 'favorites',
+      layout: {
+        'text-field': '★',
+        'text-size': ['match', ['get', 'status'], 'filtered-out', 16, 22],
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
+      },
+      paint: {
+        'text-color': statusColor,
+        'text-opacity': ['match', ['get', 'status'], 'filtered-out', 0.5, 1],
+        'text-halo-color': '#fff',
+        'text-halo-width': 1.5,
+      },
     })
 
-    map.on('mouseenter', 'stations-layer', () => {
-      if (map) map.getCanvas().style.cursor = 'pointer'
-    })
-    map.on('mouseleave', 'stations-layer', () => {
-      if (map) map.getCanvas().style.cursor = ''
-    })
+    for (const layer of ['stations-layer', 'favorites-layer']) {
+      map.on('click', layer, (e) => {
+        const name = e.features?.[0]?.properties?.name
+        if (name) store.toggleStation(name)
+      })
+      map.on('mouseenter', layer, () => {
+        if (map) map.getCanvas().style.cursor = 'pointer'
+      })
+      map.on('mouseleave', layer, () => {
+        if (map) map.getCanvas().style.cursor = ''
+      })
+    }
   })
 })
 
@@ -96,10 +133,20 @@ onUnmounted(() => {
   map = null
 })
 
-watch([() => [...store.crossedOff], () => store.filteredStations.value, hideCrossedOff], () => {
-  const source = map?.getSource('stations') as maplibregl.GeoJSONSource | undefined
-  source?.setData(buildGeoJSON())
-})
+watch(
+  [
+    () => [...store.crossedOff],
+    () => [...store.favorites],
+    () => store.filteredStations.value,
+    hideCrossedOff,
+  ],
+  () => {
+    ;(map?.getSource('stations') as maplibregl.GeoJSONSource | undefined)?.setData(buildGeoJSON())
+    ;(map?.getSource('favorites') as maplibregl.GeoJSONSource | undefined)?.setData(
+      buildFavGeoJSON(),
+    )
+  },
+)
 </script>
 
 <template>

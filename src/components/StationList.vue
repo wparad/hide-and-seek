@@ -134,6 +134,13 @@ function saveLines() {
         <span class="station-lines">
           {{ store.getStationLines(station.name).join(', ') || 'no line data' }}
         </span>
+        <button
+          class="fav-btn"
+          :class="{ active: store.favorites.includes(station.name) }"
+          @click.stop="store.toggleFavorite(station.name)"
+        >
+          {{ store.favorites.includes(station.name) ? '★' : '☆' }}
+        </button>
         <button class="edit-lines-btn" @click.stop="openLineEditor(station.name)">✏️</button>
       </div>
       <div v-if="editingStation === station.name" class="line-editor" @click.stop>
@@ -265,6 +272,22 @@ function saveLines() {
 .char-slider {
   width: 100%;
   accent-color: #0066cc;
+}
+
+.fav-btn {
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  cursor: pointer;
+  font-size: 18px;
+  flex-shrink: 0;
+  color: #ccc;
+  -webkit-tap-highlight-color: transparent;
+  line-height: 1;
+}
+
+.fav-btn.active {
+  color: #f59e0b;
 }
 
 .edit-lines-btn {
