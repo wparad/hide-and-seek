@@ -12,7 +12,7 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'map', label: 'Map', icon: '\uD83D\uDDFA\uFE0F' },
   { id: 'stations', label: 'Stations', icon: '\uD83D\uDE89' },
   { id: 'history', label: 'History', icon: '\uD83D\uDCDC' },
-  { id: 'actions', label: 'Actions', icon: '\u26A1' },
+  { id: 'actions', label: 'Admin', icon: '\u2699\uFE0F' },
 ]
 </script>
 

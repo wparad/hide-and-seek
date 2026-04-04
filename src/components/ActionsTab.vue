@@ -14,6 +14,17 @@ function confirmReset() {
 
 <template>
   <div class="actions-tab">
+    <section class="action-section">
+      <label class="toggle-row">
+        <input
+          type="checkbox"
+          :checked="store.hideNoLineData"
+          @change="store.toggleHideNoLineData()"
+        />
+        <span>Hide stations with no line data</span>
+      </label>
+    </section>
+
     <section class="action-section danger-section">
       <button class="action-btn danger-btn" @click="showResetConfirm = true">
         Reset Everything
@@ -37,6 +48,22 @@ function confirmReset() {
 <style scoped>
 .actions-tab {
   padding: 16px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.toggle-row input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+  accent-color: #0066cc;
+  cursor: pointer;
 }
 
 .action-section {

@@ -17,6 +17,8 @@ interface GameState {
   actions: GameAction[]
   activeTab: TabId
   crossedOff: string[]
+  lineOverrides: Record<string, string[]>
+  hideNoLineData: boolean
 }
 
 const STORAGE_KEY = 'hide-and-seek-zurich'
@@ -30,12 +32,20 @@ function loadState(): GameState {
         actions: parsed.actions ?? [],
         activeTab: parsed.activeTab ?? 'stations',
         crossedOff: parsed.crossedOff ?? [],
+        lineOverrides: parsed.lineOverrides ?? {},
+        hideNoLineData: parsed.hideNoLineData ?? false,
       }
     }
   } catch {
     // corrupted storage — start fresh
   }
-  return { actions: [], activeTab: 'stations', crossedOff: [] }
+  return {
+    actions: [],
+    activeTab: 'stations',
+    crossedOff: [],
+    lineOverrides: {},
+    hideNoLineData: false,
+  }
 }
 
 function saveState(state: GameState) {
@@ -45,19 +55,25 @@ function saveState(state: GameState) {
       actions: state.actions,
       activeTab: state.activeTab,
       crossedOff: state.crossedOff,
+      lineOverrides: state.lineOverrides,
+      hideNoLineData: state.hideNoLineData,
     }),
   )
 }
 
-function applyActions(allStations: Station[], actions: GameAction[]): Station[] {
+function applyActions(
+  allStations: Station[],
+  actions: GameAction[],
+  lineOverrides: Record<string, string[]>,
+): Station[] {
   let result = allStations
   for (const action of actions) {
     if (!action.enabled) continue
     if (action.type === 'line') {
       if (action.mode === 'exclude') {
-        result = result.filter((s) => !s.lines.includes(action.value))
+        result = result.filter((s) => !(lineOverrides[s.name] ?? s.lines).includes(action.value))
       } else {
-        result = result.filter((s) => s.lines.includes(action.value))
+        result = result.filter((s) => (lineOverrides[s.name] ?? s.lines).includes(action.value))
       }
     } else if (action.type === 'character') {
       const lower = action.value.toLowerCase()
@@ -75,7 +91,9 @@ function createStore() {
   const initial = loadState()
   const state = reactive<GameState>(initial)
 
-  const filteredStations = computed(() => applyActions(stations, state.actions))
+  const filteredStations = computed(() =>
+    applyActions(stations, state.actions, state.lineOverrides),
+  )
   const totalStations = stations.length
 
   function persist() {
@@ -118,9 +136,25 @@ function createStore() {
     persist()
   }
 
+  function setStationLines(name: string, lines: string[]) {
+    state.lineOverrides[name] = lines
+    persist()
+  }
+
+  function getStationLines(name: string): string[] {
+    return state.lineOverrides[name] ?? stations.find((s) => s.name === name)?.lines ?? []
+  }
+
+  function toggleHideNoLineData() {
+    state.hideNoLineData = !state.hideNoLineData
+    persist()
+  }
+
   function resetAll() {
     state.actions.splice(0, state.actions.length)
     state.crossedOff.splice(0, state.crossedOff.length)
+    Object.keys(state.lineOverrides).forEach((k) => delete state.lineOverrides[k])
+    state.hideNoLineData = false
     persist()
   }
 
@@ -142,7 +176,13 @@ function createStore() {
     get crossedOff() {
       return state.crossedOff
     },
+    get hideNoLineData() {
+      return state.hideNoLineData
+    },
     addAction,
+    setStationLines,
+    getStationLines,
+    toggleHideNoLineData,
     toggleStation,
     toggleAction,
     removeAction,
