@@ -53,8 +53,8 @@ function confirmReset() {
 
     <section class="action-section">
       <div class="btn-row">
-        <button class="action-btn" @click="checkAll">Check all</button>
-        <button class="action-btn secondary-btn" @click="store.restoreAll()">Uncheck all</button>
+        <button class="action-btn" @click="checkAll">Mark off all</button>
+        <button class="action-btn secondary-btn" @click="store.restoreAll()">Unmark all</button>
       </div>
     </section>
 

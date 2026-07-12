@@ -119,7 +119,7 @@ function saveLines() {
       <select v-model="filterStatus" class="filter-select">
         <option value="all">All</option>
         <option value="available">Available</option>
-        <option value="crossed-off">Crossed off</option>
+        <option value="crossed-off">Marked off</option>
       </select>
       <input v-model="filterText" class="filter-input" type="text" placeholder="Search name…" />
     </div>
@@ -190,7 +190,7 @@ function saveLines() {
     <Teleport to="body">
       <div v-if="showReasonModal" class="overlay" @click.self="cancelCrossOff">
         <div class="modal">
-          <p class="modal-text">Cross off {{ pendingStation }}?</p>
+          <p class="modal-text">Mark off {{ pendingStation }}?</p>
           <input
             v-model="reasonText"
             type="text"
@@ -200,7 +200,7 @@ function saveLines() {
           />
           <div class="modal-buttons">
             <button class="modal-btn cancel-btn" @click="cancelCrossOff">Cancel</button>
-            <button class="modal-btn confirm-btn" @click="confirmCrossOff">Cross off</button>
+            <button class="modal-btn confirm-btn" @click="confirmCrossOff">Mark off</button>
           </div>
         </div>
       </div>

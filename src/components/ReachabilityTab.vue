@@ -314,7 +314,7 @@ function applyToStations() {
 
       <div class="results-header">
         <h3>Unreachable ({{ unreachableStations.length }})</h3>
-        <button class="apply-btn" @click="applyToStations">Apply — cross off unreachable</button>
+        <button class="apply-btn" @click="applyToStations">Apply — mark off unreachable</button>
       </div>
       <ul class="unreachable-list">
         <li v-for="s in unreachableStations" :key="s.name">{{ s.name }}</li>

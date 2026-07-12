@@ -16,6 +16,12 @@ const pendingCrossOff = ref('')
 const showReasonModal = ref(false)
 const reasonText = ref('')
 
+// Radius tool state
+const radiusMode = ref(false)
+const radiusMeters = ref(5000)
+const radiusCenter = ref<[number, number] | null>(null)
+const stationsInRadius = ref<Set<string>>(new Set())
+
 const LAYER_GROUPS: Record<keyof MapLayerVisibility, RegExp> = {
   roads:
     /^(tunnel_(motorway|service|link|street|minor|secondary|tertiary|trunk|primary|path)|road_(area|motorway|service|link|minor|secondary|tertiary|trunk|primary|path|one_way)|bridge_(motorway|service|link|street|path|secondary|tertiary|trunk|primary)|highway-shield|road_shield)/,
@@ -73,7 +79,7 @@ function buildPopupHTML(name: string): string {
       ${reasonHtml}
       <label class="map-popup-check">
         <input type="checkbox" data-action="toggle" ${crossed ? '' : 'checked'} />
-        <span>${crossed ? 'Crossed off' : 'Available'}</span>
+        <span>${crossed ? 'Marked off' : 'Available'}</span>
       </label>
       <a class="map-popup-link" href="https://www.google.com/search?q=${query}" target="_blank" rel="noopener">
         Search Google
@@ -128,6 +134,106 @@ function stationStatus(name: string): Status {
   return 'filtered-out'
 }
 
+// Haversine distance in meters between two [lng, lat] points
+function haversineMeters(a: [number, number], b: [number, number]): number {
+  const R = 6371000
+  const toRad = (deg: number) => (deg * Math.PI) / 180
+  const dLat = toRad(b[1] - a[1])
+  const dLng = toRad(b[0] - a[0])
+  const sinLat = Math.sin(dLat / 2)
+  const sinLng = Math.sin(dLng / 2)
+  const h = sinLat * sinLat + Math.cos(toRad(a[1])) * Math.cos(toRad(b[1])) * sinLng * sinLng
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+// Generate a GeoJSON polygon circle (approximation with 64 segments)
+function buildCircleGeoJSON(center: [number, number], radiusM: number): GeoJSON.FeatureCollection {
+  const points = 64
+  const coords: [number, number][] = []
+  const km = radiusM / 1000
+  for (let i = 0; i <= points; i++) {
+    const angle = (i / points) * 2 * Math.PI
+    const dx = km * Math.cos(angle)
+    const dy = km * Math.sin(angle)
+    const lng = center[0] + dx / (111.32 * Math.cos((center[1] * Math.PI) / 180))
+    const lat = center[1] + dy / 110.574
+    coords.push([lng, lat])
+  }
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [coords] },
+        properties: {},
+      },
+    ],
+  }
+}
+
+function updateRadiusCircle() {
+  if (!map) return
+  const source = map.getSource('radius-circle') as maplibregl.GeoJSONSource | undefined
+  if (!source) return
+
+  if (!radiusCenter.value) {
+    source.setData({ type: 'FeatureCollection', features: [] })
+    stationsInRadius.value = new Set()
+    return
+  }
+
+  source.setData(buildCircleGeoJSON(radiusCenter.value, radiusMeters.value))
+
+  // Find stations within radius
+  const inRange = new Set<string>()
+  for (const s of stations) {
+    if (haversineMeters(radiusCenter.value, s.coordinates) <= radiusMeters.value) {
+      inRange.add(s.name)
+    }
+  }
+  stationsInRadius.value = inRange
+}
+
+function handleMapClick(e: maplibregl.MapMouseEvent) {
+  if (!radiusMode.value) return
+  radiusCenter.value = [e.lngLat.lng, e.lngLat.lat]
+  updateRadiusCircle()
+  // Refresh station layers to show golden hue
+  ;(map?.getSource('stations') as maplibregl.GeoJSONSource | undefined)?.setData(buildGeoJSON())
+  ;(map?.getSource('favorites') as maplibregl.GeoJSONSource | undefined)?.setData(buildFavGeoJSON())
+}
+
+function clearRadius() {
+  radiusCenter.value = null
+  radiusMode.value = false
+  stationsInRadius.value = new Set()
+  updateRadiusCircle()
+  ;(map?.getSource('stations') as maplibregl.GeoJSONSource | undefined)?.setData(buildGeoJSON())
+  ;(map?.getSource('favorites') as maplibregl.GeoJSONSource | undefined)?.setData(buildFavGeoJSON())
+}
+
+function crossOffInRadius() {
+  const names = [...stationsInRadius.value].filter((n) => !(n in store.crossedOff))
+  if (names.length === 0) return
+  const km =
+    radiusMeters.value >= 1000
+      ? `${(radiusMeters.value / 1000).toFixed(1)}km`
+      : `${radiusMeters.value}m`
+  store.crossOffAll(names, `Inside ${km} radius`)
+}
+
+function crossOffOutsideRadius() {
+  const names = stations
+    .filter((s) => !stationsInRadius.value.has(s.name) && !(s.name in store.crossedOff))
+    .map((s) => s.name)
+  if (names.length === 0) return
+  const km =
+    radiusMeters.value >= 1000
+      ? `${(radiusMeters.value / 1000).toFixed(1)}km`
+      : `${radiusMeters.value}m`
+  store.crossOffAll(names, `Outside ${km} radius`)
+}
+
 function buildGeoJSON(): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
@@ -137,7 +243,11 @@ function buildGeoJSON(): GeoJSON.FeatureCollection {
       .map((s) => ({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: s.coordinates },
-        properties: { name: s.name, status: stationStatus(s.name) },
+        properties: {
+          name: s.name,
+          status: stationStatus(s.name),
+          inRadius: stationsInRadius.value.has(s.name) ? 'yes' : 'no',
+        },
       })),
   }
 }
@@ -151,7 +261,11 @@ function buildFavGeoJSON(): GeoJSON.FeatureCollection {
       .map((s) => ({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: s.coordinates },
-        properties: { name: s.name, status: stationStatus(s.name) },
+        properties: {
+          name: s.name,
+          status: stationStatus(s.name),
+          inRadius: stationsInRadius.value.has(s.name) ? 'yes' : 'no',
+        },
       })),
   }
 }
@@ -193,15 +307,16 @@ onMounted(() => {
     map.addSource('lines', { type: 'geojson', data: buildLinesGeoJSON() })
     map.addSource('stations', { type: 'geojson', data: buildGeoJSON() })
     map.addSource('favorites', { type: 'geojson', data: buildFavGeoJSON() })
+    map.addSource('radius-circle', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    })
 
     const statusColor: maplibregl.ExpressionSpecification = [
-      'match',
-      ['get', 'status'],
-      'available',
-      '#22c55e',
-      'crossed-off',
-      '#ef4444',
-      '#9ca3af',
+      'case',
+      ['==', ['get', 'inRadius'], 'yes'],
+      '#f59e0b',
+      ['match', ['get', 'status'], 'available', '#22c55e', 'crossed-off', '#ef4444', '#9ca3af'],
     ]
 
     map.addLayer({
@@ -212,6 +327,27 @@ onMounted(() => {
         'line-color': '#000',
         'line-width': 3,
         'line-opacity': 0.6,
+      },
+    })
+
+    map.addLayer({
+      id: 'radius-circle-layer',
+      type: 'fill',
+      source: 'radius-circle',
+      paint: {
+        'fill-color': '#f59e0b',
+        'fill-opacity': 0.12,
+      },
+    })
+
+    map.addLayer({
+      id: 'radius-circle-outline',
+      type: 'line',
+      source: 'radius-circle',
+      paint: {
+        'line-color': '#f59e0b',
+        'line-width': 2,
+        'line-opacity': 0.7,
       },
     })
 
@@ -287,6 +423,8 @@ onMounted(() => {
     }
 
     syncMapLayers()
+
+    map.on('click', (e) => handleMapClick(e))
   })
 })
 
@@ -321,22 +459,60 @@ watch(
     map.setLayoutProperty('station-labels', 'visibility', visible ? 'visible' : 'none')
   },
 )
+
+watch(radiusMeters, () => {
+  if (!radiusCenter.value) return
+  updateRadiusCircle()
+  ;(map?.getSource('stations') as maplibregl.GeoJSONSource | undefined)?.setData(buildGeoJSON())
+  ;(map?.getSource('favorites') as maplibregl.GeoJSONSource | undefined)?.setData(buildFavGeoJSON())
+})
 </script>
 
 <template>
   <div class="map-wrapper">
     <div ref="mapEl" class="map-container" />
-    <button
-      :class="['toggle-btn', { active: hideCrossedOff }]"
-      @click="hideCrossedOff = !hideCrossedOff"
-    >
-      {{ hideCrossedOff ? 'Show all' : 'Hide crossed off' }}
-    </button>
+
+    <div class="map-controls">
+      <button
+        :class="['toggle-btn', { active: hideCrossedOff }]"
+        @click="hideCrossedOff = !hideCrossedOff"
+      >
+        {{ hideCrossedOff ? 'Show all' : 'Hide marked off' }}
+      </button>
+      <button :class="['toggle-btn', { active: radiusMode }]" @click="radiusMode = !radiusMode">
+        📍 Radius
+      </button>
+    </div>
+
+    <div v-if="radiusMode" class="radius-panel">
+      <div class="radius-label">
+        {{ radiusMeters >= 1000 ? `${(radiusMeters / 1000).toFixed(1)} km` : `${radiusMeters} m` }}
+        <span v-if="stationsInRadius.size > 0" class="radius-count">
+          · {{ stationsInRadius.size }} stations
+        </span>
+      </div>
+      <input
+        v-model.number="radiusMeters"
+        type="range"
+        :min="100"
+        :max="30000"
+        :step="100"
+        class="radius-slider"
+      />
+      <div class="radius-hint">
+        {{ radiusCenter ? 'Tap map to move center' : 'Tap map to place circle' }}
+        <button v-if="radiusCenter" class="radius-clear" @click="clearRadius">Clear</button>
+      </div>
+      <div v-if="radiusCenter && stationsInRadius.size > 0" class="radius-actions">
+        <button class="radius-action-btn" @click="crossOffInRadius">Mark off inside</button>
+        <button class="radius-action-btn" @click="crossOffOutsideRadius">Mark off outside</button>
+      </div>
+    </div>
 
     <Teleport to="body">
       <div v-if="showReasonModal" class="overlay" @click.self="cancelMapCrossOff">
         <div class="modal">
-          <p class="modal-text">Cross off {{ pendingCrossOff }}?</p>
+          <p class="modal-text">Mark off {{ pendingCrossOff }}?</p>
           <input
             v-model="reasonText"
             type="text"
@@ -346,7 +522,7 @@ watch(
           />
           <div class="modal-buttons">
             <button class="modal-btn cancel-btn" @click="cancelMapCrossOff">Cancel</button>
-            <button class="modal-btn confirm-btn" @click="confirmMapCrossOff">Cross off</button>
+            <button class="modal-btn confirm-btn" @click="confirmMapCrossOff">Mark off</button>
           </div>
         </div>
       </div>
@@ -366,11 +542,17 @@ watch(
   inset: 0;
 }
 
-.toggle-btn {
+.map-controls {
   position: absolute;
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  z-index: 10;
+}
+
+.toggle-btn {
   padding: 8px 16px;
   background: #fff;
   border: 1px solid #ddd;
@@ -381,13 +563,76 @@ watch(
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
   -webkit-tap-highlight-color: transparent;
   white-space: nowrap;
-  z-index: 10;
 }
 
 .toggle-btn.active {
   background: #0066cc;
   color: #fff;
   border-color: #0066cc;
+}
+
+.radius-panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 60px;
+  background: #fff;
+  border-radius: 10px;
+  padding: 10px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+.radius-label {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.radius-count {
+  font-weight: 400;
+  color: #f59e0b;
+}
+
+.radius-slider {
+  width: 100%;
+  accent-color: #f59e0b;
+}
+
+.radius-hint {
+  font-size: 12px;
+  color: #888;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.radius-clear {
+  padding: 3px 10px;
+  font-size: 12px;
+  background: #f0f0f0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.radius-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.radius-action-btn {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  background: #e44;
+  color: #fff;
+  cursor: pointer;
 }
 
 .overlay {

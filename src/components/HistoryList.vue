@@ -50,7 +50,7 @@ function formatTime(ts: number): string {
         <div class="history-info">
           <span class="history-desc">{{ entry.item.name }}</span>
           <span class="history-time">
-            {{ entry.item.type === 'cross-off' ? 'crossed off' : 'restored' }} ·
+            {{ entry.item.type === 'cross-off' ? 'marked off' : 'unmarked' }} ·
             {{ formatTime(entry.item.createdAt) }}
           </span>
         </div>
@@ -66,7 +66,7 @@ function formatTime(ts: number): string {
 
     <div v-if="entries.length === 0" class="empty">
       <p>No history yet.</p>
-      <p class="empty-hint">Cross off stations or add filters to see history here.</p>
+      <p class="empty-hint">Mark off stations or add filters to see history here.</p>
     </div>
   </div>
 </template>
