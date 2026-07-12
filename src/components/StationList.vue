@@ -12,6 +12,10 @@ const filterCharCount = ref(0)
 const editingStation = ref<string | null>(null)
 const editingLines = ref<string[]>([])
 
+const showReasonModal = ref(false)
+const pendingStation = ref('')
+const reasonText = ref('')
+
 const maxCharCount = computed(() => Math.max(...stations.map((s) => s.name.length)))
 
 const visibleStations = computed(() => {
@@ -22,9 +26,9 @@ const visibleStations = computed(() => {
   }
 
   if (filterStatus.value === 'available') {
-    result = result.filter((s) => !store.crossedOff.includes(s.name))
+    result = result.filter((s) => !(s.name in store.crossedOff))
   } else if (filterStatus.value === 'crossed-off') {
-    result = result.filter((s) => store.crossedOff.includes(s.name))
+    result = result.filter((s) => s.name in store.crossedOff)
   }
 
   if (filterText.value) {
@@ -50,12 +54,33 @@ const visibleStations = computed(() => {
   return result
 })
 
-const availableCount = computed(
-  () => stations.filter((s) => !store.crossedOff.includes(s.name)).length,
-)
+const availableCount = computed(() => stations.filter((s) => !(s.name in store.crossedOff)).length)
 
 function isCrossedOff(name: string) {
-  return store.crossedOff.includes(name)
+  return name in store.crossedOff
+}
+
+function handleStationClick(name: string) {
+  if (name in store.crossedOff) {
+    store.toggleStation(name)
+    return
+  }
+  pendingStation.value = name
+  reasonText.value = ''
+  showReasonModal.value = true
+}
+
+function confirmCrossOff() {
+  store.toggleStation(pendingStation.value, reasonText.value || 'Manual')
+  showReasonModal.value = false
+  pendingStation.value = ''
+  reasonText.value = ''
+}
+
+function cancelCrossOff() {
+  showReasonModal.value = false
+  pendingStation.value = ''
+  reasonText.value = ''
 }
 
 function openLineEditor(name: string) {
@@ -122,13 +147,13 @@ function saveLines() {
     <template v-for="station in visibleStations" :key="station.name">
       <div
         :class="['station-item', { 'crossed-off': isCrossedOff(station.name) }]"
-        @click="store.toggleStation(station.name)"
+        @click="handleStationClick(station.name)"
       >
         <input
           type="checkbox"
           class="station-checkbox"
           :checked="!isCrossedOff(station.name)"
-          @click.stop="store.toggleStation(station.name)"
+          @click.stop="handleStationClick(station.name)"
         />
         <span class="station-name">{{ station.name }}</span>
         <span class="station-lines">
@@ -161,6 +186,25 @@ function saveLines() {
     <div v-if="visibleStations.length === 0" class="empty">
       <p>No stations match filters.</p>
     </div>
+
+    <Teleport to="body">
+      <div v-if="showReasonModal" class="overlay" @click.self="cancelCrossOff">
+        <div class="modal">
+          <p class="modal-text">Cross off {{ pendingStation }}?</p>
+          <input
+            v-model="reasonText"
+            type="text"
+            class="reason-input"
+            placeholder="Reason (e.g. visited, closed…)"
+            @keyup.enter="confirmCrossOff"
+          />
+          <div class="modal-buttons">
+            <button class="modal-btn cancel-btn" @click="cancelCrossOff">Cancel</button>
+            <button class="modal-btn confirm-btn" @click="confirmCrossOff">Cross off</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -354,5 +398,64 @@ function saveLines() {
   align-items: center;
   padding: 48px 16px;
   color: #999;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px;
+  width: min(320px, 90vw);
+  text-align: center;
+}
+
+.modal-text {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 16px;
+}
+
+.reason-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.modal-btn {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cancel-btn {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.confirm-btn {
+  background: #e44;
+  color: #fff;
 }
 </style>

@@ -1,13 +1,27 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useStore } from '../store'
+import { useStore, type MapLayerVisibility } from '../store'
 
 const store = useStore()
 
 const showResetConfirm = ref(false)
 
+const mapLayerLabels: { key: keyof MapLayerVisibility; label: string }[] = [
+  { key: 'roads', label: 'Roads & highways' },
+  { key: 'rail', label: 'Rail lines' },
+  { key: 'labels', label: 'Place labels' },
+  { key: 'buildings', label: 'Buildings' },
+  { key: 'poi', label: 'Points of interest' },
+  { key: 'boundaries', label: 'Boundaries' },
+  { key: 'water', label: 'Water' },
+  { key: 'landuse', label: 'Land use & parks' },
+]
+
 function checkAll() {
-  store.crossOffAll(store.filteredStations.value.map((s) => s.name))
+  store.crossOffAll(
+    store.filteredStations.value.map((s) => s.name),
+    'Bulk cross-off',
+  )
 }
 
 function confirmReset() {
@@ -27,6 +41,14 @@ function confirmReset() {
         />
         <span>Hide stations with no line data</span>
       </label>
+      <label class="toggle-row">
+        <input
+          type="checkbox"
+          :checked="store.showStationLabels"
+          @change="store.toggleShowStationLabels()"
+        />
+        <span>Show station labels on map</span>
+      </label>
     </section>
 
     <section class="action-section">
@@ -34,6 +56,18 @@ function confirmReset() {
         <button class="action-btn" @click="checkAll">Check all</button>
         <button class="action-btn secondary-btn" @click="store.restoreAll()">Uncheck all</button>
       </div>
+    </section>
+
+    <section class="action-section">
+      <h3 class="section-title">Map layers</h3>
+      <label v-for="layer in mapLayerLabels" :key="layer.key" class="toggle-row">
+        <input
+          type="checkbox"
+          :checked="store.mapLayers[layer.key]"
+          @change="store.toggleMapLayer(layer.key)"
+        />
+        <span>{{ layer.label }}</span>
+      </label>
     </section>
 
     <section class="action-section danger-section">
@@ -68,6 +102,11 @@ function confirmReset() {
   font-size: 15px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  margin-bottom: 10px;
+}
+
+.toggle-row:last-child {
+  margin-bottom: 0;
 }
 
 .toggle-row input[type='checkbox'] {
@@ -75,6 +114,15 @@ function confirmReset() {
   height: 20px;
   accent-color: #0066cc;
   cursor: pointer;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
 }
 
 .action-section {

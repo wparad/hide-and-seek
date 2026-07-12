@@ -1,7 +1,7 @@
 import { reactive, computed } from 'vue'
 import { stations, type Station } from './stations'
 
-export type TabId = 'map' | 'stations' | 'history' | 'actions' | 'links'
+export type TabId = 'map' | 'stations' | 'history' | 'actions' | 'links' | 'reachability'
 
 export interface GameAction {
   id: string
@@ -20,14 +20,55 @@ export interface StationEvent {
   createdAt: number
 }
 
+export interface MapLayerVisibility {
+  roads: boolean
+  rail: boolean
+  labels: boolean
+  buildings: boolean
+  poi: boolean
+  boundaries: boolean
+  water: boolean
+  landuse: boolean
+}
+
+export interface ReachableInfo {
+  arrivalTime: string
+  path: string[]
+  needsOffset: boolean
+}
+
+export interface ReachabilityState {
+  startStation: string
+  startTime: string
+  travelMinutes: number
+  offsetMinutes: number
+  results: Map<string, ReachableInfo> | null
+  log: string[]
+}
+
+const STATE_VERSION = 2
+
+const DEFAULT_MAP_LAYERS: MapLayerVisibility = {
+  roads: false,
+  rail: true,
+  labels: false,
+  buildings: true,
+  poi: false,
+  boundaries: false,
+  water: true,
+  landuse: true,
+}
+
 interface GameState {
   actions: GameAction[]
   activeTab: TabId
-  crossedOff: string[]
+  crossedOff: Record<string, string>
   favorites: string[]
   lineOverrides: Record<string, string[]>
   hideNoLineData: boolean
   stationHistory: StationEvent[]
+  mapLayers: MapLayerVisibility
+  showStationLabels: boolean
 }
 
 const STORAGE_KEY = 'hide-and-seek-zurich'
@@ -51,12 +92,13 @@ function crossedOffFromUrl(): string[] | null {
   return idsToNames(ids)
 }
 
-function syncUrl(crossedOff: string[]) {
+function syncUrl(crossedOff: Record<string, string>) {
+  const names = Object.keys(crossedOff)
   const url = new URL(window.location.href)
-  if (crossedOff.length === 0) {
+  if (names.length === 0) {
     url.searchParams.delete('c')
   } else {
-    url.searchParams.set('c', namesToIds(crossedOff).join(','))
+    url.searchParams.set('c', namesToIds(names).join(','))
   }
   history.replaceState(null, '', url)
 }
@@ -66,28 +108,44 @@ function loadState(): GameState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
-      const parsed = JSON.parse(raw) as GameState
+      const parsed = JSON.parse(raw)
+      if (parsed.version !== STATE_VERSION) {
+        localStorage.removeItem(STORAGE_KEY)
+        return freshState(fromUrl)
+      }
+      const crossedOff = fromUrl
+        ? Object.fromEntries(fromUrl.map((n) => [n, 'Imported from URL']))
+        : (parsed.crossedOff ?? {})
       return {
         actions: parsed.actions ?? [],
         activeTab: parsed.activeTab ?? 'stations',
-        crossedOff: fromUrl ?? parsed.crossedOff ?? [],
+        crossedOff,
         favorites: parsed.favorites ?? [],
         lineOverrides: parsed.lineOverrides ?? {},
         hideNoLineData: parsed.hideNoLineData ?? true,
         stationHistory: parsed.stationHistory ?? [],
+        mapLayers: { ...DEFAULT_MAP_LAYERS, ...(parsed.mapLayers ?? {}) },
+        showStationLabels: parsed.showStationLabels ?? true,
       }
     }
   } catch {
     // corrupted storage — start fresh
   }
+  return freshState(fromUrl)
+}
+
+function freshState(fromUrl: string[] | null): GameState {
+  const crossedOff = fromUrl ? Object.fromEntries(fromUrl.map((n) => [n, 'Imported from URL'])) : {}
   return {
     actions: [],
     activeTab: 'stations',
-    crossedOff: fromUrl ?? [],
+    crossedOff,
     favorites: [],
     lineOverrides: {},
     hideNoLineData: true,
     stationHistory: [],
+    mapLayers: { ...DEFAULT_MAP_LAYERS },
+    showStationLabels: true,
   }
 }
 
@@ -95,6 +153,7 @@ function saveState(state: GameState) {
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
+      version: STATE_VERSION,
       actions: state.actions,
       activeTab: state.activeTab,
       crossedOff: state.crossedOff,
@@ -102,6 +161,8 @@ function saveState(state: GameState) {
       lineOverrides: state.lineOverrides,
       hideNoLineData: state.hideNoLineData,
       stationHistory: state.stationHistory,
+      mapLayers: state.mapLayers,
+      showStationLabels: state.showStationLabels,
     }),
   )
 }
@@ -132,9 +193,23 @@ function applyActions(
   return result
 }
 
+function getCurrentTime(): string {
+  const now = new Date()
+  return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
+}
+
 function createStore() {
   const initial = loadState()
   const state = reactive<GameState>(initial)
+
+  const reachability = reactive<ReachabilityState>({
+    startStation: '',
+    startTime: getCurrentTime(),
+    travelMinutes: 45,
+    offsetMinutes: 3,
+    results: null,
+    log: [],
+  })
 
   const filteredStations = computed(() =>
     applyActions(stations, state.actions, state.lineOverrides),
@@ -172,40 +247,49 @@ function createStore() {
     }
   }
 
-  function toggleStation(name: string) {
-    const idx = state.crossedOff.indexOf(name)
-    const type: StationEvent['type'] = idx === -1 ? 'cross-off' : 'restore'
-    if (idx === -1) {
-      state.crossedOff.push(name)
+  function toggleStation(name: string, reason?: string) {
+    const isCrossedOff = name in state.crossedOff
+    if (isCrossedOff) {
+      delete state.crossedOff[name]
+      state.stationHistory.push({
+        id: crypto.randomUUID(),
+        name,
+        type: 'restore',
+        createdAt: Date.now(),
+      })
     } else {
-      state.crossedOff.splice(idx, 1)
+      state.crossedOff[name] = reason ?? 'No reason given'
+      state.stationHistory.push({
+        id: crypto.randomUUID(),
+        name,
+        type: 'cross-off',
+        createdAt: Date.now(),
+      })
     }
-    state.stationHistory.push({ id: crypto.randomUUID(), name, type, createdAt: Date.now() })
     persist()
   }
 
-  function crossOffAll(names: string[]) {
+  function crossOffAll(names: string[], reason: string) {
     const now = Date.now()
     for (const name of names) {
-      if (!state.crossedOff.includes(name)) {
-        state.crossedOff.push(name)
-        state.stationHistory.push({
-          id: crypto.randomUUID(),
-          name,
-          type: 'cross-off',
-          createdAt: now,
-        })
-      }
+      if (name in state.crossedOff) continue
+      state.crossedOff[name] = reason
+      state.stationHistory.push({
+        id: crypto.randomUUID(),
+        name,
+        type: 'cross-off',
+        createdAt: now,
+      })
     }
     persist()
   }
 
   function restoreAll() {
     const now = Date.now()
-    for (const name of [...state.crossedOff]) {
+    for (const name of Object.keys(state.crossedOff)) {
       state.stationHistory.push({ id: crypto.randomUUID(), name, type: 'restore', createdAt: now })
     }
-    state.crossedOff.splice(0, state.crossedOff.length)
+    state.crossedOff = {}
     persist()
   }
 
@@ -224,6 +308,10 @@ function createStore() {
     return state.lineOverrides[name] ?? stations.find((s) => s.name === name)?.lines ?? []
   }
 
+  function getCrossOffReason(name: string): string | undefined {
+    return state.crossedOff[name]
+  }
+
   function toggleFavorite(name: string) {
     const idx = state.favorites.indexOf(name)
     if (idx === -1) {
@@ -239,13 +327,20 @@ function createStore() {
     persist()
   }
 
+  function toggleShowStationLabels() {
+    state.showStationLabels = !state.showStationLabels
+    persist()
+  }
+
   function resetAll() {
     state.actions.splice(0, state.actions.length)
-    state.crossedOff.splice(0, state.crossedOff.length)
+    state.crossedOff = {}
     Object.keys(state.lineOverrides).forEach((k) => delete state.lineOverrides[k])
     state.hideNoLineData = true
     state.stationHistory.splice(0, state.stationHistory.length)
     state.favorites.splice(0, state.favorites.length)
+    Object.assign(state.mapLayers, DEFAULT_MAP_LAYERS)
+    state.showStationLabels = true
     persist()
   }
 
@@ -254,10 +349,16 @@ function createStore() {
     persist()
   }
 
+  function toggleMapLayer(layer: keyof MapLayerVisibility) {
+    state.mapLayers[layer] = !state.mapLayers[layer]
+    persist()
+  }
+
   return {
     state,
     filteredStations,
     totalStations,
+    reachability,
     get actions() {
       return state.actions
     },
@@ -276,11 +377,19 @@ function createStore() {
     get stationHistory() {
       return state.stationHistory
     },
+    get mapLayers() {
+      return state.mapLayers
+    },
+    get showStationLabels() {
+      return state.showStationLabels
+    },
     addAction,
     setStationLines,
     getStationLines,
+    getCrossOffReason,
     toggleFavorite,
     toggleHideNoLineData,
+    toggleShowStationLabels,
     toggleStation,
     crossOffAll,
     restoreAll,
@@ -289,6 +398,7 @@ function createStore() {
     removeAction,
     resetAll,
     setTab,
+    toggleMapLayer,
   }
 }
 

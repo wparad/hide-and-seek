@@ -2,8 +2,8 @@
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { useStore } from '../store'
-import { stations } from '../stations'
+import { useStore, type MapLayerVisibility } from '../store'
+import { stations, lineNames, lineRoutes } from '../stations'
 
 const store = useStore()
 const mapEl = ref<HTMLDivElement | null>(null)
@@ -11,6 +11,37 @@ const hideCrossedOff = ref(false)
 let map: maplibregl.Map | null = null
 let popup: maplibregl.Popup | null = null
 let popupStation: string | null = null
+
+const pendingCrossOff = ref('')
+const showReasonModal = ref(false)
+const reasonText = ref('')
+
+const LAYER_GROUPS: Record<keyof MapLayerVisibility, RegExp> = {
+  roads:
+    /^(tunnel_(motorway|service|link|street|minor|secondary|tertiary|trunk|primary|path)|road_(area|motorway|service|link|minor|secondary|tertiary|trunk|primary|path|one_way)|bridge_(motorway|service|link|street|path|secondary|tertiary|trunk|primary)|highway-shield|road_shield)/,
+  rail: /^(tunnel_(major_rail|transit_rail)|road_(major_rail|transit_rail)|bridge_(major_rail|transit_rail))/,
+  labels: /^(label_|waterway_line_label|water_name_|highway-name)/,
+  buildings: /^building/,
+  poi: /^(poi_|airport)/,
+  boundaries: /^boundary/,
+  water: /^(water|waterway)/,
+  landuse: /^(landuse_|landcover_|park)/,
+}
+
+function syncMapLayers() {
+  if (!map) return
+  const style = map.getStyle()
+  if (!style) return
+  for (const layer of style.layers) {
+    for (const [group, pattern] of Object.entries(LAYER_GROUPS)) {
+      if (pattern.test(layer.id)) {
+        const visible = store.mapLayers[group as keyof MapLayerVisibility]
+        map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none')
+        break
+      }
+    }
+  }
+}
 
 function openPopup(name: string, lngLat: maplibregl.LngLatLike) {
   if (!map) return
@@ -24,11 +55,14 @@ function openPopup(name: string, lngLat: maplibregl.LngLatLike) {
 }
 
 function buildPopupHTML(name: string): string {
-  const crossed = store.crossedOff.includes(name)
+  const crossed = name in store.crossedOff
   const fav = store.favorites.includes(name)
   const lines = store.getStationLines(name)
   const linesText = lines.length ? lines.join(', ') : 'no line data'
   const query = encodeURIComponent(`${name} Bahnhof ZVV`)
+  const reason = store.getCrossOffReason(name)
+  const reasonHtml =
+    crossed && reason ? `<div class="map-popup-reason">Reason: ${reason}</div>` : ''
   return `
     <div class="map-popup">
       <div class="map-popup-header">
@@ -36,6 +70,7 @@ function buildPopupHTML(name: string): string {
         <button class="map-popup-fav${fav ? ' active' : ''}" data-action="favorite">${fav ? '★' : '☆'}</button>
       </div>
       <div class="map-popup-lines">${linesText}</div>
+      ${reasonHtml}
       <label class="map-popup-check">
         <input type="checkbox" data-action="toggle" ${crossed ? '' : 'checked'} />
         <span>${crossed ? 'Crossed off' : 'Available'}</span>
@@ -49,8 +84,34 @@ function buildPopupHTML(name: string): string {
 
 function onPopupClick(e: Event) {
   const target = e.target as HTMLElement
-  if (target.dataset.action === 'toggle' && popupStation) store.toggleStation(popupStation)
+  if (target.dataset.action === 'toggle' && popupStation) {
+    if (popupStation in store.crossedOff) {
+      // Restoring — no reason needed
+      store.toggleStation(popupStation)
+      refreshPopup()
+    } else {
+      // Crossing off — show reason modal
+      pendingCrossOff.value = popupStation
+      reasonText.value = ''
+      showReasonModal.value = true
+    }
+  }
   if (target.dataset.action === 'favorite' && popupStation) store.toggleFavorite(popupStation)
+}
+
+function confirmMapCrossOff() {
+  store.toggleStation(pendingCrossOff.value, reasonText.value || 'Manual')
+  showReasonModal.value = false
+  pendingCrossOff.value = ''
+  reasonText.value = ''
+  refreshPopup()
+}
+
+function cancelMapCrossOff() {
+  showReasonModal.value = false
+  pendingCrossOff.value = ''
+  reasonText.value = ''
+  refreshPopup()
 }
 
 function refreshPopup() {
@@ -62,7 +123,7 @@ function refreshPopup() {
 type Status = 'available' | 'crossed-off' | 'filtered-out'
 
 function stationStatus(name: string): Status {
-  if (store.crossedOff.includes(name)) return 'crossed-off'
+  if (name in store.crossedOff) return 'crossed-off'
   if (store.filteredStations.value.some((s) => s.name === name)) return 'available'
   return 'filtered-out'
 }
@@ -95,6 +156,25 @@ function buildFavGeoJSON(): GeoJSON.FeatureCollection {
   }
 }
 
+function buildLinesGeoJSON(): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = []
+  const stationCoords = new Map(stations.map((s) => [s.name, s.coordinates]))
+  for (const lineName of lineNames) {
+    const route = lineRoutes[lineName]
+    if (!route || route.length < 2) continue
+    const coordinates = route
+      .map((name) => stationCoords.get(name))
+      .filter((c): c is [number, number] => c !== undefined)
+    if (coordinates.length < 2) continue
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates },
+      properties: { line: lineName },
+    })
+  }
+  return { type: 'FeatureCollection', features }
+}
+
 onMounted(() => {
   if (!mapEl.value) return
 
@@ -110,6 +190,7 @@ onMounted(() => {
   map.on('load', () => {
     if (!map) return
 
+    map.addSource('lines', { type: 'geojson', data: buildLinesGeoJSON() })
     map.addSource('stations', { type: 'geojson', data: buildGeoJSON() })
     map.addSource('favorites', { type: 'geojson', data: buildFavGeoJSON() })
 
@@ -122,6 +203,17 @@ onMounted(() => {
       '#ef4444',
       '#9ca3af',
     ]
+
+    map.addLayer({
+      id: 'lines-layer',
+      type: 'line',
+      source: 'lines',
+      paint: {
+        'line-color': '#000',
+        'line-width': 3,
+        'line-opacity': 0.6,
+      },
+    })
 
     map.addLayer({
       id: 'stations-layer',
@@ -141,6 +233,25 @@ onMounted(() => {
           '#6b7280',
         ],
         'circle-opacity': ['match', ['get', 'status'], 'filtered-out', 0.5, 1],
+      },
+    })
+
+    map.addLayer({
+      id: 'station-labels',
+      type: 'symbol',
+      source: 'stations',
+      layout: {
+        'text-field': ['get', 'name'],
+        'text-size': 10,
+        'text-offset': [0, -1.5],
+        'text-anchor': 'bottom',
+        'text-allow-overlap': false,
+        visibility: store.showStationLabels ? 'visible' : 'none',
+      },
+      paint: {
+        'text-color': '#333',
+        'text-halo-color': '#fff',
+        'text-halo-width': 1,
       },
     })
 
@@ -174,6 +285,8 @@ onMounted(() => {
         if (map) map.getCanvas().style.cursor = ''
       })
     }
+
+    syncMapLayers()
   })
 })
 
@@ -185,7 +298,7 @@ onUnmounted(() => {
 
 watch(
   [
-    () => [...store.crossedOff],
+    () => ({ ...store.crossedOff }),
     () => [...store.favorites],
     () => store.filteredStations.value,
     hideCrossedOff,
@@ -196,6 +309,16 @@ watch(
       buildFavGeoJSON(),
     )
     refreshPopup()
+  },
+)
+
+watch(() => ({ ...store.mapLayers }), syncMapLayers)
+
+watch(
+  () => store.showStationLabels,
+  (visible) => {
+    if (!map) return
+    map.setLayoutProperty('station-labels', 'visibility', visible ? 'visible' : 'none')
   },
 )
 </script>
@@ -209,6 +332,25 @@ watch(
     >
       {{ hideCrossedOff ? 'Show all' : 'Hide crossed off' }}
     </button>
+
+    <Teleport to="body">
+      <div v-if="showReasonModal" class="overlay" @click.self="cancelMapCrossOff">
+        <div class="modal">
+          <p class="modal-text">Cross off {{ pendingCrossOff }}?</p>
+          <input
+            v-model="reasonText"
+            type="text"
+            class="reason-input"
+            placeholder="Reason (e.g. visited, closed…)"
+            @keyup.enter="confirmMapCrossOff"
+          />
+          <div class="modal-buttons">
+            <button class="modal-btn cancel-btn" @click="cancelMapCrossOff">Cancel</button>
+            <button class="modal-btn confirm-btn" @click="confirmMapCrossOff">Cross off</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -246,6 +388,65 @@ watch(
   background: #0066cc;
   color: #fff;
   border-color: #0066cc;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px;
+  width: min(320px, 90vw);
+  text-align: center;
+}
+
+.modal-text {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 16px;
+}
+
+.reason-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.modal-btn {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cancel-btn {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.confirm-btn {
+  background: #e44;
+  color: #fff;
 }
 </style>
 
@@ -287,6 +488,13 @@ watch(
   font-size: 12px;
   color: #666;
   margin-bottom: 10px;
+}
+
+.map-popup-reason {
+  font-size: 12px;
+  color: #e44;
+  margin-bottom: 8px;
+  font-style: italic;
 }
 
 .map-popup-check {
