@@ -4,6 +4,17 @@ export interface Station {
   lines: string[]
 }
 
+/** Non-station points of interest. Coordinates are [lng, lat] sourced from Google Maps. */
+export interface Location {
+  name: string
+  coordinates: [number, number]
+  symbol: string
+}
+
+export const locations: Location[] = [
+  { name: 'Zürich Airport', coordinates: [8.59907, 47.4533773], symbol: '✈️' },
+]
+
 export const stations: Station[] = [
   { name: 'Aathal', coordinates: [8.7661516, 47.3356571], lines: ['S14'] },
   { name: 'Adliswil', coordinates: [8.5241966, 47.3123128], lines: ['S4'] },

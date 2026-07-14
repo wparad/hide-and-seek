@@ -50,8 +50,11 @@ function formatTime(ts: number): string {
         <div class="history-info">
           <span class="history-desc">{{ entry.item.name }}</span>
           <span class="history-time">
-            {{ entry.item.type === 'cross-off' ? 'marked off' : 'unmarked' }} ·
-            {{ formatTime(entry.item.createdAt) }}
+            {{ entry.item.type === 'cross-off' ? 'marked off' : 'unmarked' }}
+            <template v-if="entry.item.type === 'cross-off' && entry.item.reason">
+              · {{ entry.item.reason }}
+            </template>
+            · {{ formatTime(entry.item.createdAt) }}
           </span>
         </div>
         <button

@@ -7,6 +7,7 @@ Deployed to GitHub Pages from `dist/`.
 
 - Remote: `git@github.com:wparad/hide-and-seek.git`
 - GitHub Pages base path: `/hide-and-seek/`
+- Deployed: https://warrenparad.net/hide-and-seek
 
 ## Commands
 

@@ -17,6 +17,7 @@ export interface StationEvent {
   id: string
   name: string
   type: 'cross-off' | 'restore'
+  reason?: string
   createdAt: number
 }
 
@@ -258,11 +259,13 @@ function createStore() {
         createdAt: Date.now(),
       })
     } else {
-      state.crossedOff[name] = reason ?? 'No reason given'
+      const r = reason ?? 'No reason given'
+      state.crossedOff[name] = r
       state.stationHistory.push({
         id: crypto.randomUUID(),
         name,
         type: 'cross-off',
+        reason: r,
         createdAt: Date.now(),
       })
     }
@@ -278,6 +281,7 @@ function createStore() {
         id: crypto.randomUUID(),
         name,
         type: 'cross-off',
+        reason,
         createdAt: now,
       })
     }
