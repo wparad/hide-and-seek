@@ -8,6 +8,7 @@ import { stations, locations, lineNames, lineRoutes } from '../stations'
 const store = useStore()
 const mapEl = ref<HTMLDivElement | null>(null)
 const hideCrossedOff = ref(false)
+const showLocations = ref(true)
 let map: maplibregl.Map | null = null
 let popup: maplibregl.Popup | null = null
 let popupStation: string | null = null
@@ -505,8 +506,8 @@ function updateScissorMarkers() {
 
 function createArrowEl(angleDeg: number): HTMLDivElement {
   const el = document.createElement('div')
-  el.style.cssText = `font-size:20px;pointer-events:none;user-select:none;transform:rotate(${angleDeg}deg);color:#7c3aed;`
-  el.textContent = '▶'
+  el.style.cssText = `width:20px;height:20px;pointer-events:none;user-select:none;transform:rotate(${angleDeg}deg);`
+  el.innerHTML = `<svg viewBox="0 0 20 20" width="20" height="20"><polygon points="4,2 18,10 4,18" fill="#7c3aed"/></svg>`
   return el
 }
 
@@ -1024,7 +1025,7 @@ onMounted(() => {
       source: 'locations',
       layout: {
         'text-field': ['get', 'symbol'],
-        'text-size': 20,
+        'text-size': 28,
         'text-allow-overlap': true,
         'text-ignore-placement': true,
       },
@@ -1206,6 +1207,13 @@ watch(scissorMode, (active) => {
     updateScissorVisuals()
   }
 })
+
+watch(showLocations, (visible) => {
+  if (!map) return
+  const v = visible ? 'visible' : 'none'
+  map.setLayoutProperty('locations-layer', 'visibility', v)
+  map.setLayoutProperty('locations-labels', 'visibility', v)
+})
 </script>
 
 <template>
@@ -1218,6 +1226,12 @@ watch(scissorMode, (active) => {
         @click="hideCrossedOff = !hideCrossedOff"
       >
         {{ hideCrossedOff ? 'Show all' : 'Hide marked off' }}
+      </button>
+      <button
+        :class="['toggle-btn', { active: showLocations }]"
+        @click="showLocations = !showLocations"
+      >
+        📍 Places
       </button>
       <button :class="['toggle-btn', { active: radiusMode }]" @click="radiusMode = !radiusMode">
         📍 Radius
