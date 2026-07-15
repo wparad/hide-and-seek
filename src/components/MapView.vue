@@ -3,7 +3,7 @@ import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { useStore, type MapLayerVisibility } from '../store'
-import { stations, locations, lineNames, lineRoutes } from '../stations'
+import { stations, locations, lineNames, geoLineDrawing } from '../stations'
 
 const store = useStore()
 const mapEl = ref<HTMLDivElement | null>(null)
@@ -870,7 +870,7 @@ function buildLinesGeoJSON(): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = []
   const stationCoords = new Map(stations.map((s) => [s.name, s.coordinates]))
   for (const lineName of lineNames) {
-    const route = lineRoutes[lineName]
+    const route = geoLineDrawing[lineName]
     if (!route || route.length < 2) continue
     const coordinates = route
       .map((name) => stationCoords.get(name))

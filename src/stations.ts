@@ -308,12 +308,11 @@ export const lineNames: string[] = [
 ]
 
 /**
- * Station ordering per line (fetched from GTFS via gtfs.geops.ch).
- * Routes only include stations in the `stations` array above. Lines that extend beyond
- * our zone are truncated — we only track ZVV zone stations.
- * S18 (Forchbahn) is not in the national GTFS and is maintained manually.
+ * Approximate station ordering per line for MAP DRAWING ONLY.
+ * This data is incomplete (missing branches) and should NOT be used for line
+ * assignment or filtering. Use station.lines for authoritative line membership.
  */
-export const lineRoutes: Record<string, string[]> = {
+export const geoLineDrawing: Record<string, string[]> = {
   S2: [
     'Pfäffikon SZ',
     'Richterswil',
