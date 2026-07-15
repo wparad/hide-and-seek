@@ -131,9 +131,10 @@ async function main() {
   }
   console.error(`  Found ${tripIdToLine.size} S-Bahn trips`)
 
-  // 4. Parse stop_times.txt → group stops by trip
+  // 4. Parse stop_times.txt → group stops by trip AND collect lines-per-station
   console.error('  Parsing stop_times.txt (this takes a moment)...')
   const tripStops = new Map<string, { seq: number; stopId: string }[]>()
+  const stationLines = new Map<string, Set<string>>() // station name → set of lines serving it
   const stopTimesPath = join(TMP_DIR, 'stop_times.txt')
   const rl = createInterface({ input: createReadStream(stopTimesPath), crlfDelay: Infinity })
   let stHeaders: string[] | null = null
@@ -146,11 +147,22 @@ async function main() {
       continue
     }
     const row = parseCsvLine(line, stHeaders)
-    if (!tripIdToLine.has(row.trip_id)) continue
+    const lineName = tripIdToLine.get(row.trip_id)
+    if (!lineName) continue
+
+    // Collect for route ordering
     const arr = tripStops.get(row.trip_id)
     const entry = { seq: parseInt(row.stop_sequence, 10), stopId: row.stop_id }
     if (arr) arr.push(entry)
     else tripStops.set(row.trip_id, [entry])
+
+    // Collect lines per station (exhaustive — any trip that stops here counts)
+    const stopName = stopIdToName.get(row.stop_id)
+    if (stopName) {
+      const s = stationLines.get(stopName)
+      if (s) s.add(lineName)
+      else stationLines.set(stopName, new Set([lineName]))
+    }
   }
   console.error(`  Collected stop times for ${tripStops.size} trips`)
 
@@ -230,6 +242,25 @@ async function main() {
     }
   }
   console.log(`}`)
+
+  // 7. Compare derived lines-per-station with hardcoded
+  console.error('\n  === Lines-per-station comparison (GTFS vs hardcoded) ===')
+  let diffs = 0
+  for (const s of stations) {
+    const hardcoded = new Set(s.lines)
+    const fromGtfs = stationLines.get(s.name) ?? new Set<string>()
+    const needsAdd = [...fromGtfs].filter((l) => !hardcoded.has(l)).sort()
+    const needsRemove = [...hardcoded].filter((l) => !fromGtfs.has(l)).sort()
+    if (needsAdd.length || needsRemove.length) {
+      const parts: string[] = []
+      if (needsAdd.length) parts.push('+' + needsAdd.join(','))
+      if (needsRemove.length) parts.push('-' + needsRemove.join(','))
+      console.error(`    ${s.name}: ${parts.join(' ')}`)
+      diffs++
+    }
+  }
+  if (diffs === 0) console.error('    ✓ No discrepancies')
+  else console.error(`\n    ${diffs} stations with discrepancies`)
 
   // Cleanup
   await rm(TMP_DIR, { recursive: true, force: true })
