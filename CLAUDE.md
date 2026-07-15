@@ -51,3 +51,24 @@ Deployed to GitHub Pages from `dist/`.
 - NEVER modify `stations.ts` by hand — regenerate from Overpass data if updates are needed
 - Every filter action gets a unique ID (`crypto.randomUUID()`) and is togglable
 - The filter chain is deterministic: same enabled actions in same order → same result
+
+## Data Maintenance
+
+Station line assignments are verified using the stationboard API. To re-run the analysis:
+
+1. **Fetch stationboard data**: `npx tsx scripts/fetch-line-routes.ts`
+   - Queries transport.opendata.ch for each station (Saturday 10:00, limit 300, max 2 pages)
+   - Results cached in `data/stationboard-results.json` (resumable on crash)
+   - Stations returning no results: S17/S18 (different API category), or construction closures
+
+2. **Compare with current data**: `npx tsx scripts/compare-stationboard.ts`
+   - Shows discrepancies between stationboard results and hardcoded `lines` arrays
+   - Ignores S17/S18 lines (private operators, not returned as category 'S')
+   - Ignores construction-affected stations (manually tracked)
+
+3. **Known limitations**:
+   - API uses station name "Uetikon" for "Uetikon am See" — script handles this
+   - S17 (Limmattal Bahn) and S18 (Forchbahn) use non-'S' categories in the API
+   - Construction closures cause legitimate stations to return empty — don't remove them
+   - GTFS data (gtfs.geops.ch) marks pass-throughs as stops — unreliable for line assignments
+   - Stationboard is the ground truth for which lines serve a station

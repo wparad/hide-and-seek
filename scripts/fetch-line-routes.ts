@@ -1,270 +1,160 @@
 /**
- * Fetches complete station ordering for all ZVV S-Bahn lines from the Swiss GTFS feed.
- * Source: gtfs.geops.ch (no auth required, daily-updated mirror of opentransportdata.swiss)
+ * Queries transport.opendata.ch stationboard API for each station to determine
+ * which S-Bahn lines serve it. Results are cached incrementally to
+ * data/stationboard-results.json so the script can be resumed after interruption.
  *
- * Strategy:
- * 1. Download the GTFS zip
- * 2. Parse routes.txt → find ZVV S-Bahn route IDs
- * 3. Parse trips.txt → find trips for those routes
- * 4. Parse stop_times.txt → get ordered stops per trip
- * 5. Parse stops.txt → map stop_id to stop_name
- * 6. For each line: pick the trip with the most stops, filter to known stations
- *
- * Output: prints a TypeScript `lineRoutes` export ready to paste into stations.ts
+ * Output (stderr): comparison report — stationboard-derived lines vs hardcoded lines in stations.ts
+ * Output (stdout): updated station `lines` arrays as TypeScript (matching stations.ts format)
  *
  * Run: npx tsx scripts/fetch-line-routes.ts
  */
 
-import { createWriteStream, mkdirSync, existsSync, createReadStream } from 'node:fs'
-import { rm } from 'node:fs/promises'
-import { pipeline } from 'node:stream/promises'
-import { createInterface } from 'node:readline'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { execSync } from 'node:child_process'
-
-const GTFS_URL = 'https://gtfs.geops.ch/dl/gtfs_complete.zip'
-const TMP_DIR = join(import.meta.dirname, '../.gtfs-tmp')
-const ZIP_PATH = join(TMP_DIR, 'gtfs.zip')
+import { stations } from '../src/stations.ts'
 
 const LINES = [
   'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11',
   'S12', 'S13', 'S14', 'S15', 'S16', 'S17', 'S18', 'S19', 'S20', 'S21',
   'S24', 'S25', 'S26', 'S29', 'S30', 'S33', 'S35', 'S36', 'S40', 'S41', 'S42',
-]
+] as const
 
-async function downloadGtfs() {
-  if (!existsSync(TMP_DIR)) mkdirSync(TMP_DIR, { recursive: true })
-  if (existsSync(ZIP_PATH)) {
-    console.error('  Using cached GTFS zip')
-    return
-  }
-  console.error('  Downloading GTFS feed...')
-  const resp = await fetch(GTFS_URL)
-  if (!resp.ok || !resp.body) throw new Error(`Download failed: ${resp.status}`)
-  await pipeline(resp.body as unknown as NodeJS.ReadableStream, createWriteStream(ZIP_PATH))
-  console.error('  Download complete')
+const LINES_SET = new Set<string>(LINES)
+
+const DATA_DIR = join(import.meta.dirname!, '../data')
+const RESULTS_FILE = join(DATA_DIR, 'stationboard-results.json')
+
+const BASE_URL = 'https://transport.opendata.ch/v1/stationboard'
+const DATETIME = '2026-07-19 10:00'
+const LIMIT = 300
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function extractGtfs() {
-  console.error('  Extracting...')
-  execSync(
-    `unzip -o -q "${ZIP_PATH}" routes.txt trips.txt stop_times.txt stops.txt -d "${TMP_DIR}"`,
-  )
+function loadResults(): Record<string, string[]> {
+  if (!existsSync(RESULTS_FILE)) return {}
+  return JSON.parse(readFileSync(RESULTS_FILE, 'utf-8'))
 }
 
-function parseCsvLine(line: string, headers: string[]): Record<string, string> {
-  const values: string[] = []
-  let current = ''
-  let inQuotes = false
-  for (const ch of line) {
-    if (ch === '"') {
-      inQuotes = !inQuotes
-      continue
-    }
-    if (ch === ',' && !inQuotes) {
-      values.push(current)
-      current = ''
-      continue
-    }
-    current += ch
-  }
-  values.push(current)
-  const row: Record<string, string> = {}
-  for (let i = 0; i < headers.length; i++) {
-    row[headers[i]] = values[i] ?? ''
-  }
-  return row
+function saveResults(results: Record<string, string[]>): void {
+  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true })
+  writeFileSync(RESULTS_FILE, JSON.stringify(results, null, 2) + '\n')
 }
 
-async function parseCsv(
-  filename: string,
-  filter?: (row: Record<string, string>) => boolean,
-): Promise<Record<string, string>[]> {
-  const filePath = join(TMP_DIR, filename)
-  const rl = createInterface({ input: createReadStream(filePath), crlfDelay: Infinity })
-  let headers: string[] | null = null
-  const rows: Record<string, string>[] = []
-  for await (const line of rl) {
-    if (!headers) {
-      headers = line
-        .replace(/^\uFEFF/, '')
-        .split(',')
-        .map((h) => h.replace(/"/g, '').trim())
-      continue
-    }
-    const row = parseCsvLine(line, headers)
-    if (!filter || filter(row)) rows.push(row)
+interface IStationboardEntry {
+  category: string
+  number: string
+  stop: { departure: string | null }
+}
+
+async function fetchStationboard(station: string, datetime: string): Promise<IStationboardEntry[]> {
+  const url = new URL(BASE_URL)
+  url.searchParams.set('station', station)
+  url.searchParams.set('limit', String(LIMIT))
+  url.searchParams.append('transportations[]', 'train')
+  url.searchParams.set('datetime', datetime)
+
+  const resp = await fetch(url.toString())
+  if (!resp.ok) {
+    console.error(`  ⚠️  HTTP ${resp.status} for ${station}`)
+    return []
   }
-  return rows
+  const data = await resp.json()
+  return data.stationboard ?? []
+}
+
+function extractLines(entries: IStationboardEntry[]): Set<string> {
+  const lines = new Set<string>()
+  for (const entry of entries) {
+    if (entry.category === 'S') {
+      const line = 'S' + entry.number
+      if (LINES_SET.has(line)) lines.add(line)
+    }
+  }
+  return lines
+}
+
+function parseTime(isoString: string | null): string | null {
+  if (!isoString) return null
+  // Format: "2026-07-19T18:32:00+0200" — extract HH:MM
+  const match = isoString.match(/T(\d{2}:\d{2})/)
+  return match ? match[1] : null
+}
+
+async function queryStation(stationName: string): Promise<string[]> {
+  // Page 1
+  const page1 = await fetchStationboard(stationName, DATETIME)
+  const lines = extractLines(page1)
+
+  // Page 2: if we got 300 results and the last departure is before 20:00
+  if (page1.length >= LIMIT) {
+    const lastEntry = page1[page1.length - 1]
+    const lastTime = parseTime(lastEntry?.stop?.departure)
+    if (lastTime && lastTime < '20:00') {
+      const lastDep = lastEntry.stop.departure!
+      // Use the full ISO datetime for the next query — extract date + time
+      const dateTimePart = lastDep.replace(/T/, ' ').replace(/\+.*$/, '').slice(0, 16)
+      console.error(`    Page 2 from ${dateTimePart}`)
+      await sleep(500)
+      const page2 = await fetchStationboard(stationName, dateTimePart)
+      for (const line of extractLines(page2)) lines.add(line)
+    }
+  }
+
+  // Sort by LINES order
+  return LINES.filter((l) => lines.has(l))
 }
 
 async function main() {
-  await downloadGtfs()
-  extractGtfs()
+  const results = loadResults()
+  const total = stations.length
+  let processed = 0
 
-  // 1. Parse stops.txt → map stop_id to stop_name
-  console.error('  Parsing stops.txt...')
-  const stopsRows = await parseCsv('stops.txt')
-  const stopIdToName = new Map<string, string>()
-  for (const row of stopsRows) {
-    stopIdToName.set(row.stop_id, row.stop_name)
-  }
-
-  // 2. Parse routes.txt → find S-Bahn route IDs
-  console.error('  Parsing routes.txt...')
-  const routesRows = await parseCsv('routes.txt', (row) => {
-    const shortName = row.route_short_name?.trim()
-    return LINES.includes(shortName)
-  })
-  const routeIdToLine = new Map<string, string>()
-  for (const row of routesRows) {
-    routeIdToLine.set(row.route_id, row.route_short_name.trim())
-  }
-  console.error(`  Found ${routeIdToLine.size} S-Bahn routes`)
-
-  // 3. Parse trips.txt → map trip_id to line
-  console.error('  Parsing trips.txt...')
-  const tripsRows = await parseCsv('trips.txt', (row) => routeIdToLine.has(row.route_id))
-  const tripIdToLine = new Map<string, string>()
-  for (const row of tripsRows) {
-    tripIdToLine.set(row.trip_id, routeIdToLine.get(row.route_id)!)
-  }
-  console.error(`  Found ${tripIdToLine.size} S-Bahn trips`)
-
-  // 4. Parse stop_times.txt → group stops by trip AND collect lines-per-station
-  console.error('  Parsing stop_times.txt (this takes a moment)...')
-  const tripStops = new Map<string, { seq: number; stopId: string }[]>()
-  const stationLines = new Map<string, Set<string>>() // station name → set of lines serving it
-  const stopTimesPath = join(TMP_DIR, 'stop_times.txt')
-  const rl = createInterface({ input: createReadStream(stopTimesPath), crlfDelay: Infinity })
-  let stHeaders: string[] | null = null
-  for await (const line of rl) {
-    if (!stHeaders) {
-      stHeaders = line
-        .replace(/^\uFEFF/, '')
-        .split(',')
-        .map((h) => h.replace(/"/g, '').trim())
+  for (const station of stations) {
+    processed++
+    if (results[station.name]) {
+      console.error(`  [${processed}/${total}] ${station.name} — cached`)
       continue
     }
-    const row = parseCsvLine(line, stHeaders)
-    const lineName = tripIdToLine.get(row.trip_id)
-    if (!lineName) continue
 
-    // Collect for route ordering
-    const arr = tripStops.get(row.trip_id)
-    const entry = { seq: parseInt(row.stop_sequence, 10), stopId: row.stop_id }
-    if (arr) arr.push(entry)
-    else tripStops.set(row.trip_id, [entry])
-
-    // Collect lines per station (exhaustive — any trip that stops here counts)
-    const stopName = stopIdToName.get(row.stop_id)
-    if (stopName) {
-      const s = stationLines.get(stopName)
-      if (s) s.add(lineName)
-      else stationLines.set(stopName, new Set([lineName]))
-    }
-  }
-  console.error(`  Collected stop times for ${tripStops.size} trips`)
-
-  // 5. For each line, find the trip with the most stops
-  const { stations } = await import('../src/stations.ts')
-  const knownNames = new Set(stations.map((s) => s.name))
-
-  // Group trips by line
-  const lineTrips = new Map<string, string[]>()
-  for (const [tripId, line] of tripIdToLine) {
-    const arr = lineTrips.get(line)
-    if (arr) arr.push(tripId)
-    else lineTrips.set(line, [tripId])
+    console.error(`  [${processed}/${total}] ${station.name}...`)
+    const lines = await queryStation(station.name)
+    results[station.name] = lines
+    saveResults(results)
+    console.error(`    → ${lines.join(', ') || '(none)'}`)
+    await sleep(500)
   }
 
-  const lineRoutes: Record<string, string[]> = {}
-  const unknownStations: string[] = []
-
-  for (const line of LINES) {
-    const trips = lineTrips.get(line) ?? []
-    let bestRoute: string[] = []
-
-    for (const tripId of trips) {
-      const stops = tripStops.get(tripId)
-      if (!stops) continue
-      stops.sort((a, b) => a.seq - b.seq)
-      const names = stops.map((s) => stopIdToName.get(s.stopId) ?? '').filter(Boolean)
-
-      // Filter to known stations only
-      const filtered = names.filter((n) => knownNames.has(n))
-      // Deduplicate consecutive (some GTFS feeds repeat stops)
-      const deduped = filtered.filter((n, i) => i === 0 || n !== filtered[i - 1])
-
-      if (deduped.length > bestRoute.length) {
-        bestRoute = deduped
-        // Track unknown stations for reporting
-        for (const n of names) {
-          if (!knownNames.has(n)) unknownStations.push(`${n} (${line})`)
-        }
-      }
-    }
-
-    if (bestRoute.length >= 2) {
-      lineRoutes[line] = bestRoute
-    }
-  }
-
-  // Report
-  console.error(`\nResults:`)
-  console.error(`  Lines found: ${Object.keys(lineRoutes).length}/${LINES.length}`)
-  const missing = LINES.filter((l) => !lineRoutes[l])
-  if (missing.length > 0) console.error(`  Missing: ${missing.join(', ')}`)
-
-  if (unknownStations.length > 0) {
-    const unique = [...new Set(unknownStations)].sort()
-    console.error(`\n  ⚠️  Stations in routes NOT in stations.ts (${unique.length}):`)
-    for (const s of unique.slice(0, 30)) console.error(`    - ${s}`)
-    if (unique.length > 30) console.error(`    ... and ${unique.length - 30} more`)
-  }
-
-  // Output TypeScript
-  console.log(`/**`)
-  console.log(` * Station ordering per line (fetched from GTFS via gtfs.geops.ch).`)
-  console.log(` * Routes only include stations in the \`stations\` array above.`)
-  console.log(` */`)
-  console.log(`export const lineRoutes: Record<string, string[]> = {`)
-  for (const line of LINES) {
-    const route = lineRoutes[line]
-    if (!route) continue
-    const quoted = route.map((s) => `'${s.replace(/'/g, "\\'")}'`)
-    if (quoted.length <= 6) {
-      console.log(`  ${line}: [${quoted.join(', ')}],`)
-    } else {
-      console.log(`  ${line}: [`)
-      for (const q of quoted) console.log(`    ${q},`)
-      console.log(`  ],`)
-    }
-  }
-  console.log(`}`)
-
-  // 7. Compare derived lines-per-station with hardcoded
-  console.error('\n  === Lines-per-station comparison (GTFS vs hardcoded) ===')
+  // === Comparison report (stderr) ===
+  console.error('\n  === Lines-per-station comparison (stationboard vs hardcoded) ===')
   let diffs = 0
   for (const s of stations) {
     const hardcoded = new Set(s.lines)
-    const fromGtfs = stationLines.get(s.name) ?? new Set<string>()
-    const needsAdd = [...fromGtfs].filter((l) => !hardcoded.has(l)).sort()
-    const needsRemove = [...hardcoded].filter((l) => !fromGtfs.has(l)).sort()
-    if (needsAdd.length || needsRemove.length) {
+    const fromApi = new Set(results[s.name] ?? [])
+    const toAdd = [...fromApi].filter((l) => !hardcoded.has(l)).sort()
+    const toRemove = [...hardcoded].filter((l) => !fromApi.has(l)).sort()
+    if (toAdd.length || toRemove.length) {
       const parts: string[] = []
-      if (needsAdd.length) parts.push('+' + needsAdd.join(','))
-      if (needsRemove.length) parts.push('-' + needsRemove.join(','))
-      console.error(`    ${s.name}: ${parts.join(' ')}`)
+      if (toAdd.length) parts.push(`+${toAdd.join(',')}`)
+      if (toRemove.length) parts.push(`-${toRemove.join(',')}`)
+      console.error(`    ${s.name}: current=[${s.lines.join(',')}] api=[${(results[s.name] ?? []).join(',')}] ${parts.join(' ')}`)
       diffs++
     }
   }
   if (diffs === 0) console.error('    ✓ No discrepancies')
   else console.error(`\n    ${diffs} stations with discrepancies`)
 
-  // Cleanup
-  await rm(TMP_DIR, { recursive: true, force: true })
-  console.error('\n  Done. Paste the output into src/stations.ts replacing the existing lineRoutes.')
+  // === Output updated stations TypeScript (stdout) ===
+  console.log(`export const stations: Station[] = [`)
+  for (const s of stations) {
+    const lines = results[s.name] ?? s.lines
+    const linesStr = lines.map((l: string) => `'${l}'`).join(', ')
+    const coordStr = `[${s.coordinates[0]}, ${s.coordinates[1]}]`
+    const entry = `  { name: '${s.name.replace(/'/g, "\\'")}', coordinates: ${coordStr}, lines: [${linesStr}] },`
+    console.log(entry)
+  }
+  console.log(`]`)
 }
 
 main().catch((e) => {
