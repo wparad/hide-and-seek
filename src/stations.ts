@@ -2,7 +2,7 @@ export interface Station {
   name: string
   coordinates: [number, number]
   lines: string[]
-  apiName?: string
+  apiNames?: string[]
 }
 
 /** Non-station points of interest. Coordinates are [lng, lat] sourced from Google Maps. */
@@ -172,7 +172,7 @@ export const stations: Station[] = [
     name: 'Uetikon am See',
     coordinates: [8.6794073, 47.2587844],
     lines: ['S6', 'S7', 'S16', 'S20'],
-    apiName: 'Uetikon',
+    apiNames: ['Uetikon'],
   },
   { name: 'Uetliberg', coordinates: [8.4874187, 47.3518692], lines: ['S10'] },
   { name: 'Uitikon Waldegg', coordinates: [8.4657676, 47.3661005], lines: ['S10'] },
@@ -231,19 +231,30 @@ export const stations: Station[] = [
   {
     name: 'Zürich Hauptbahnhof',
     coordinates: [8.5390316, 47.3779298],
-    lines: ['S21', 'S24', 'S25', 'S42'],
+    lines: [
+      'S2',
+      'S3',
+      'S4',
+      'S5',
+      'S6',
+      'S7',
+      'S8',
+      'S9',
+      'S10',
+      'S11',
+      'S12',
+      'S14',
+      'S15',
+      'S16',
+      'S19',
+      'S20',
+      'S21',
+      'S24',
+      'S25',
+      'S42',
+    ],
+    apiNames: ['Zürich HB'],
   },
-  {
-    name: 'Zürich Hauptbahnhof (Löwenstrasse)',
-    coordinates: [8.5371091, 47.378199],
-    lines: ['S2', 'S8', 'S14', 'S19'],
-  },
-  {
-    name: 'Zürich Hauptbahnhof (Museumstrasse)',
-    coordinates: [8.5390843, 47.3788895],
-    lines: ['S3', 'S5', 'S6', 'S7', 'S9', 'S11', 'S12', 'S15', 'S16', 'S20'],
-  },
-  { name: 'Zürich Hauptbahnhof SZU', coordinates: [8.5399178, 47.3773092], lines: ['S4', 'S10'] },
   { name: 'Zürich Kreuzplatz', coordinates: [8.5533988, 47.3651691], lines: ['S18'] },
   { name: 'Zürich Leimbach', coordinates: [8.5187128, 47.3330367], lines: ['S4'] },
   { name: 'Zürich Manegg', coordinates: [8.5196862, 47.3378168], lines: ['S4'] },
@@ -273,415 +284,60 @@ export const stations: Station[] = [
   { name: 'Zürich Wollishofen', coordinates: [8.5338801, 47.3479186], lines: ['S8', 'S24'] },
 ]
 
-export const lineNames: string[] = [
-  'S2',
-  'S3',
-  'S4',
-  'S5',
-  'S6',
-  'S7',
-  'S8',
-  'S9',
-  'S10',
-  'S11',
-  'S12',
-  'S13',
-  'S14',
-  'S15',
-  'S16',
-  'S17',
-  'S18',
-  'S19',
-  'S20',
-  'S21',
-  'S24',
-  'S25',
-  'S26',
-  'S29',
-  'S30',
-  'S33',
-  'S35',
-  'S36',
-  'S40',
-  'S41',
-  'S42',
-]
+/** Derive line names from station data */
+export const lineNames: string[] = (() => {
+  const set = new Set<string>()
+  for (const s of stations) {
+    for (const l of s.lines) set.add(l)
+  }
+  return [...set].sort((a, b) => {
+    const na = parseInt(a.slice(1))
+    const nb = parseInt(b.slice(1))
+    return na - nb
+  })
+})()
 
-/**
- * Approximate station ordering per line for MAP DRAWING ONLY.
- * This data is incomplete (missing branches) and should NOT be used for line
- * assignment or filtering. Use station.lines for authoritative line membership.
- */
-export const geoLineDrawing: Record<string, string[]> = {
-  S2: [
-    'Pfäffikon SZ',
-    'Richterswil',
-    'Wädenswil',
-    'Au ZH',
-    'Horgen',
-    'Thalwil',
-    'Zürich Enge',
-    'Zürich Wiedikon',
-    'Zürich Oerlikon',
-    'Zürich Flughafen',
-  ],
-  S3: [
-    'Wetzikon ZH',
-    'Kempten',
-    'Pfäffikon ZH',
-    'Fehraltorf',
-    'Illnau',
-    'Effretikon',
-    'Dietlikon',
-    'Stettbach',
-    'Zürich Stadelhofen',
-    'Zürich Hardbrücke',
-    'Zürich Oerlikon',
-    'Glattbrugg',
-    'Oberglatt ZH',
-    'Bülach',
-  ],
-  S4: [
-    'Zürich Selnau',
-    'Zürich Giesshübel',
-    'Zürich Saalsporthalle',
-    'Zürich Brunau',
-    'Zürich Manegg',
-    'Zürich Leimbach',
-    'Sood-Oberleimbach',
-    'Adliswil',
-    'Sihlau',
-    'Wildpark-Höfli',
-    'Langnau-Gattikon',
-    'Sihlwald',
-  ],
-  S5: [
-    'Rapperswil SG',
-    'Rüti ZH',
-    'Bubikon',
-    'Wetzikon ZH',
-    'Uster',
-    'Nänikon-Greifensee',
-    'Schwerzenbach ZH',
-    'Zürich Stadelhofen',
-    'Zürich Hardbrücke',
-    'Zürich Altstetten',
-    'Urdorf',
-    'Urdorf Weihermatt',
-    'Birmensdorf ZH',
-    'Bonstetten-Wettswil',
-    'Hedingen',
-    'Affoltern am Albis',
-    'Mettmenstetten',
-    'Knonau',
-  ],
-  S6: [
-    'Otelfingen',
-    'Otelfingen Golfpark',
-    'Buchs-Dällikon',
-    'Regensdorf-Watt',
-    'Zürich Affoltern',
-    'Zürich Seebach',
-    'Zürich Oerlikon',
-    'Zürich Hardbrücke',
-    'Zürich Stadelhofen',
-    'Zürich Tiefenbrunnen',
-    'Zollikon',
-    'Küsnacht Goldbach',
-    'Küsnacht ZH',
-    'Erlenbach ZH',
-    'Winkel am Zürichsee',
-    'Herrliberg-Feldmeilen',
-    'Meilen',
-    'Uetikon am See',
-  ],
-  S7: [
-    'Rapperswil SG',
-    'Feldbach',
-    'Uerikon',
-    'Stäfa',
-    'Männedorf',
-    'Uetikon am See',
-    'Meilen',
-    'Zürich Stadelhofen',
-    'Zürich Hardbrücke',
-    'Zürich Oerlikon',
-    'Opfikon',
-    'Kloten Balsberg',
-    'Kloten',
-    'Bassersdorf',
-    'Effretikon',
-    'Kemptthal',
-    'Winterthur',
-  ],
-  S8: [
-    'Rapperswil SG',
-    'Pfäffikon SZ',
-    'Freienbach SBB',
-    'Bäch SZ',
-    'Richterswil',
-    'Wädenswil',
-    'Au ZH',
-    'Horgen',
-    'Oberrieden',
-    'Thalwil',
-    'Rüschlikon',
-    'Zürich Wollishofen',
-    'Zürich Enge',
-    'Zürich Wiedikon',
-    'Zürich Oerlikon',
-    'Wallisellen',
-    'Dietlikon',
-    'Effretikon',
-    'Winterthur',
-  ],
-  S9: [
-    'Rafz',
-    'Hüntwangen-Wil',
-    'Eglisau',
-    'Glattfelden',
-    'Bülach',
-    'Niederglatt ZH',
-    'Oberglatt ZH',
-    'Rümlang',
-    'Glattbrugg',
-    'Zürich Oerlikon',
-    'Zürich Hardbrücke',
-    'Zürich Stadelhofen',
-    'Stettbach',
-    'Dübendorf',
-    'Schwerzenbach ZH',
-    'Nänikon-Greifensee',
-    'Uster',
-  ],
-  S10: [
-    'Zürich Selnau',
-    'Zürich Binz',
-    'Zürich Friesenberg',
-    'Zürich Schweighof',
-    'Zürich Triemli',
-    'Ringlikon',
-    'Uitikon Waldegg',
-    'Uetliberg',
-  ],
-  S11: [
-    'Wila',
-    'Turbenthal',
-    'Rämismühle-Zell',
-    'Rikon',
-    'Kollbrunn',
-    'Sennhof-Kyburg',
-    'Winterthur Seen',
-    'Winterthur Grüze',
-    'Winterthur',
-    'Stettbach',
-    'Zürich Stadelhofen',
-    'Zürich Hardbrücke',
-    'Zürich Altstetten',
-    'Schlieren',
-    'Glanzenberg',
-    'Dietikon',
-  ],
-  S12: [
-    'Dietikon',
-    'Glanzenberg',
-    'Schlieren',
-    'Zürich Altstetten',
-    'Zürich Hardbrücke',
-    'Zürich Stadelhofen',
-    'Stettbach',
-    'Kemptthal',
-    'Winterthur',
-    'Hettlingen',
-    'Henggart',
-    'Andelfingen',
-    'Marthalen',
-    'Dachsen',
-    'Schloss Laufen am Rheinfall',
-  ],
-  S13: ['Schindellegi-Feusisberg', 'Samstagern', 'Grüenfeld', 'Burghalden', 'Wädenswil'],
-  S14: [
-    'Affoltern am Albis',
-    'Hedingen',
-    'Bonstetten-Wettswil',
-    'Birmensdorf ZH',
-    'Urdorf Weihermatt',
-    'Urdorf',
-    'Zürich Altstetten',
-    'Zürich Oerlikon',
-    'Wallisellen',
-    'Dübendorf',
-    'Schwerzenbach ZH',
-    'Nänikon-Greifensee',
-    'Uster',
-    'Aathal',
-    'Wetzikon ZH',
-    'Hinwil',
-  ],
-  S15: [
-    'Niederweningen',
-    'Niederweningen Dorf',
-    'Schöfflisdorf-Oberweningen',
-    'Steinmaur',
-    'Dielsdorf',
-    'Niederhasli',
-    'Oberglatt ZH',
-    'Rümlang',
-    'Glattbrugg',
-    'Zürich Oerlikon',
-    'Zürich Hardbrücke',
-    'Zürich Stadelhofen',
-    'Uster',
-    'Wetzikon ZH',
-    'Bubikon',
-    'Rüti ZH',
-    'Rapperswil SG',
-    'Pfäffikon SZ',
-  ],
-  S16: [
-    'Rapperswil SG',
-    'Feldbach',
-    'Uerikon',
-    'Stäfa',
-    'Männedorf',
-    'Uetikon am See',
-    'Meilen',
-    'Herrliberg-Feldmeilen',
-    'Winkel am Zürichsee',
-    'Erlenbach ZH',
-    'Küsnacht ZH',
-    'Küsnacht Goldbach',
-    'Zollikon',
-    'Zürich Tiefenbrunnen',
-    'Zürich Stadelhofen',
-    'Zürich Hardbrücke',
-    'Zürich Oerlikon',
-    'Zürich Flughafen',
-  ],
-  S17: ['Reppischhof', 'Dietikon Stoffelbach', 'Bergfrieden', 'Dietikon'],
-  S18: [
-    'Zürich Stadelhofen',
-    'Zürich Kreuzplatz',
-    'Zürich Hegibachplatz',
-    'Zürich Balgrist',
-    'Zürich Rehalp',
-    'Spital Zollikerberg',
-    'Zollikerberg',
-    'Waltikon',
-    'Zumikon',
-    'Maiacher',
-    'Neue Forch',
-    'Forch',
-    'Scheuren',
-    'Neuhaus bei Hinteregg',
-    'Hinteregg',
-    'Egg',
-    'Langwies ZH',
-    'Emmat',
-    'Esslingen',
-  ],
-  S19: [
-    'Dietikon',
-    'Zürich Altstetten',
-    'Zürich Oerlikon',
-    'Wallisellen',
-    'Dietlikon',
-    'Effretikon',
-    'Illnau',
-    'Fehraltorf',
-    'Pfäffikon ZH',
-  ],
-  S20: [
-    'Zürich Hardbrücke',
-    'Zürich Stadelhofen',
-    'Küsnacht ZH',
-    'Meilen',
-    'Uetikon am See',
-    'Männedorf',
-    'Stäfa',
-    'Uerikon',
-  ],
-  S21: ['Regensdorf-Watt', 'Zürich Affoltern', 'Zürich Oerlikon', 'Zürich Hardbrücke'],
-  S24: [
-    'Horgen Oberdorf',
-    'Oberrieden Dorf',
-    'Thalwil',
-    'Rüschlikon',
-    'Zürich Wollishofen',
-    'Zürich Enge',
-    'Zürich Wiedikon',
-    'Zürich Wipkingen',
-    'Zürich Oerlikon',
-    'Zürich Flughafen',
-    'Bassersdorf',
-    'Effretikon',
-    'Kemptthal',
-    'Winterthur',
-    'Oberwinterthur',
-    'Wiesendangen',
-    'Rickenbach-Attikon',
-  ],
-  S25: ['Pfäffikon SZ', 'Wädenswil'],
-  S26: [
-    'Winterthur',
-    'Winterthur Grüze',
-    'Winterthur Seen',
-    'Sennhof-Kyburg',
-    'Kollbrunn',
-    'Rikon',
-    'Rämismühle-Zell',
-    'Turbenthal',
-    'Wila',
-    'Saland',
-    'Bauma',
-    'Steg',
-    'Fischenthal',
-    'Gibswil',
-    'Wald ZH',
-    'Tann-Dürnten',
-    'Rüti ZH',
-  ],
-  S29: [
-    'Winterthur',
-    'Oberwinterthur',
-    'Winterthur Wallrüti',
-    'Reutlingen',
-    'Seuzach',
-    'Dinhard',
-    'Thalheim-Altikon',
-    'Ossingen',
-    'Stammheim',
-  ],
-  S30: ['Winterthur', 'Oberwinterthur', 'Wiesendangen', 'Rickenbach-Attikon'],
-  S33: [
-    'Winterthur',
-    'Hettlingen',
-    'Henggart',
-    'Andelfingen',
-    'Marthalen',
-    'Dachsen',
-    'Schloss Laufen am Rheinfall',
-  ],
-  S35: ['Winterthur', 'Winterthur Grüze', 'Winterthur Hegi', 'Räterschen', 'Schottikon', 'Elgg'],
-  S36: ['Bülach', 'Eglisau', 'Zweidlen', 'Kaiserstuhl AG'],
-  S40: [
-    'Rapperswil SG',
-    'Hurden',
-    'Pfäffikon SZ',
-    'Freienbach SOB',
-    'Wilen bei Wollerau',
-    'Wollerau',
-    'Riedmatt SZ',
-    'Samstagern',
-    'Schindellegi-Feusisberg',
-  ],
-  S41: [
-    'Winterthur',
-    'Winterthur Töss',
-    'Winterthur Wülflingen',
-    'Pfungen',
-    'Embrach-Rorbas',
-    'Bülach',
-  ],
-  S42: ['Dietikon', 'Zürich Altstetten'],
+/** Build geo line drawings by collecting stations per line and sorting by nearest-neighbor */
+export function buildGeoLines(): Record<string, [number, number][]> {
+  const lineStations = new Map<string, { name: string; coords: [number, number] }[]>()
+  for (const s of stations) {
+    for (const line of s.lines) {
+      const arr = lineStations.get(line)
+      const entry = { name: s.name, coords: s.coordinates }
+      if (arr) arr.push(entry)
+      else lineStations.set(line, [entry])
+    }
+  }
+
+  const result: Record<string, [number, number][]> = {}
+  for (const [line, stns] of lineStations) {
+    if (stns.length < 2) continue
+    // Nearest-neighbor sort starting from first station
+    const sorted: [number, number][] = []
+    const remaining = [...stns]
+    let current = remaining.shift()!
+    sorted.push(current.coords)
+    while (remaining.length > 0) {
+      let nearestIdx = 0
+      let nearestDist = Infinity
+      for (let i = 0; i < remaining.length; i++) {
+        const d = squaredDist(current.coords, remaining[i].coords)
+        if (d < nearestDist) {
+          nearestDist = d
+          nearestIdx = i
+        }
+      }
+      current = remaining.splice(nearestIdx, 1)[0]
+      sorted.push(current.coords)
+    }
+    result[line] = sorted
+  }
+  return result
+}
+
+function squaredDist(a: [number, number], b: [number, number]): number {
+  const cosLat = Math.cos(((a[1] + b[1]) / 2) * (Math.PI / 180))
+  const dx = (a[0] - b[0]) * cosLat
+  const dy = a[1] - b[1]
+  return dx * dx + dy * dy
 }
