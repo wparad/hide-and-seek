@@ -2,6 +2,7 @@ export interface Station {
   name: string
   coordinates: [number, number]
   lines: string[]
+  apiName?: string
 }
 
 /** Non-station points of interest. Coordinates are [lng, lat] sourced from Google Maps. */
@@ -171,6 +172,7 @@ export const stations: Station[] = [
     name: 'Uetikon am See',
     coordinates: [8.6794073, 47.2587844],
     lines: ['S6', 'S7', 'S16', 'S20'],
+    apiName: 'Uetikon',
   },
   { name: 'Uetliberg', coordinates: [8.4874187, 47.3518692], lines: ['S10'] },
   { name: 'Uitikon Waldegg', coordinates: [8.4657676, 47.3661005], lines: ['S10'] },

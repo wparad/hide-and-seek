@@ -299,7 +299,13 @@ function createStore() {
 
   function removeStationEvent(id: string) {
     const idx = state.stationHistory.findIndex((e) => e.id === id)
-    if (idx !== -1) state.stationHistory.splice(idx, 1)
+    if (idx !== -1) {
+      const event = state.stationHistory[idx]
+      state.stationHistory.splice(idx, 1)
+      if (event.type === 'cross-off' && event.name in state.crossedOff) {
+        delete state.crossedOff[event.name]
+      }
+    }
     persist()
   }
 

@@ -25,8 +25,16 @@ const DATA_DIR = join(import.meta.dirname!, '../data')
 const RESULTS_FILE = join(DATA_DIR, 'stationboard-results.json')
 
 const BASE_URL = 'https://transport.opendata.ch/v1/stationboard'
-const DATETIME = '2026-07-19 10:00'
 const LIMIT = 300
+
+function getNextSaturday(): string {
+  const now = new Date()
+  const day = now.getDay()
+  const daysUntilSat = day === 6 ? 0 : (6 - day + 7) % 7
+  const sat = new Date(now)
+  sat.setDate(now.getDate() + daysUntilSat)
+  return `${sat.getFullYear()}-${String(sat.getMonth() + 1).padStart(2, '0')}-${String(sat.getDate()).padStart(2, '0')} 10:00`
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -84,7 +92,7 @@ function parseTime(isoString: string | null): string | null {
 
 async function queryStation(stationName: string): Promise<string[]> {
   // Page 1
-  const page1 = await fetchStationboard(stationName, DATETIME)
+  const page1 = await fetchStationboard(stationName, getNextSaturday())
   const lines = extractLines(page1)
 
   // Page 2: if we got 300 results and the last departure is before 20:00
@@ -118,8 +126,9 @@ async function main() {
       continue
     }
 
+    const queryName = station.apiName ?? station.name
     console.error(`  [${processed}/${total}] ${station.name}...`)
-    const lines = await queryStation(station.name)
+    const lines = await queryStation(queryName)
     results[station.name] = lines
     saveResults(results)
     console.error(`    → ${lines.join(', ') || '(none)'}`)
