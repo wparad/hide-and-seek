@@ -1609,6 +1609,16 @@ watch(showLocations, (visible) => {
   padding: 4px 2px;
 }
 
+.maplibregl-popup-close-button {
+  font-size: 24px;
+  width: 36px;
+  height: 36px;
+  line-height: 36px;
+  text-align: center;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .map-popup-header {
   display: flex;
   align-items: center;

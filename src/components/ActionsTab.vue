@@ -2,6 +2,9 @@
 import { ref } from 'vue'
 import { useStore, type MapLayerVisibility } from '../store'
 
+const buildSha = __BUILD_SHA__
+const buildDate = __BUILD_DATE__
+
 const store = useStore()
 
 const showResetConfirm = ref(false)
@@ -74,6 +77,10 @@ function confirmReset() {
       <button class="action-btn danger-btn" @click="showResetConfirm = true">
         Reset Everything
       </button>
+    </section>
+
+    <section class="build-info">
+      <span>{{ buildSha }} · {{ buildDate }}</span>
     </section>
 
     <Teleport to="body">
@@ -222,5 +229,12 @@ function confirmReset() {
 .confirm-btn {
   background: #e44;
   color: #fff;
+}
+
+.build-info {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 11px;
+  color: #aaa;
 }
 </style>

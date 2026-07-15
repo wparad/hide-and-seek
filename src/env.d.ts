@@ -5,3 +5,6 @@ declare module '*.vue' {
   const component: DefineComponent<object, object, unknown>
   export default component
 }
+
+declare const __BUILD_SHA__: string
+declare const __BUILD_DATE__: string
