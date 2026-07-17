@@ -3,3 +3,4 @@ dist/
 .gtfs-tmp/
 data/*
 !data/*.md
+!data/*.pdf

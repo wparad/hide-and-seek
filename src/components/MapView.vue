@@ -679,16 +679,18 @@ function updateHotColdLabels() {
 
 function computeScissorSide() {
   const highlighted = new Set<string>()
-  if (scissorCenter.value) {
+  if (scissorCenter.value && map) {
+    // Use screen-space math to match the visual bisect line
+    const centerPx = map.project(scissorCenter.value as maplibregl.LngLatLike)
+    // Normal to the bisect line in screen space (endpoint axis direction)
     const angleRad = (scissorAngle.value * Math.PI) / 180
-    // Normal to the bisect line = direction along the endpoint axis
     const nx = Math.cos(angleRad)
-    const ny = Math.sin(angleRad)
-    const [cLng, cLat] = scissorCenter.value
+    const ny = -Math.sin(angleRad) // negate Y because screen Y is inverted
     const sign = scissorFlipped.value ? -1 : 1
     for (const s of stations) {
-      const dx = s.coordinates[0] - cLng
-      const dy = s.coordinates[1] - cLat
+      const sPx = map.project(s.coordinates as maplibregl.LngLatLike)
+      const dx = sPx.x - centerPx.x
+      const dy = sPx.y - centerPx.y
       const dot = (dx * nx + dy * ny) * sign
       if (dot > 0) highlighted.add(s.name)
     }
