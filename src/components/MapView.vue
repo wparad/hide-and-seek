@@ -2133,14 +2133,15 @@ watch(userPosition, () => {
 }
 
 .map-popup-endgame {
-  background: none;
+  background: #7c3aed;
   border: 1px solid #7c3aed;
   border-radius: 6px;
-  padding: 4px 10px;
+  padding: 6px 12px;
   font-size: 13px;
-  color: #7c3aed;
+  color: #fff;
   cursor: pointer;
   text-decoration: none;
   display: inline-block;
+  font-weight: 600;
 }
 </style>

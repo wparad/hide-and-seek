@@ -393,11 +393,12 @@ function updateMap() {
   const containerWidth = mapEl.value.clientWidth || 400
   const minZoom = getZoomForWidthKm(coords[1], 5, containerWidth)
   const maxZoom = getZoomForWidthKm(coords[1], 0.05, containerWidth)
+  const defaultZoom = getZoomForWidthKm(coords[1], 1.2, containerWidth)
 
   map.setMinZoom(minZoom)
   map.setMaxZoom(maxZoom)
   map.setCenter(coords)
-  map.setZoom(minZoom)
+  map.setZoom(defaultZoom)
   savedCenter.value = null
   savedZoom.value = 0
 
@@ -415,10 +416,11 @@ onMounted(() => {
   const containerWidth = mapEl.value.clientWidth || 400
   const minZoom = getZoomForWidthKm(coords[1], 5, containerWidth)
   const maxZoom = getZoomForWidthKm(coords[1], 0.05, containerWidth)
+  const defaultZoom = getZoomForWidthKm(coords[1], 1.2, containerWidth)
 
   const initialCenter = savedCenter.value ?? coords
   const initialZoom =
-    savedZoom.value > 0 ? Math.max(minZoom, Math.min(maxZoom, savedZoom.value)) : minZoom
+    savedZoom.value > 0 ? Math.max(minZoom, Math.min(maxZoom, savedZoom.value)) : defaultZoom
 
   map = new maplibregl.Map({
     container: mapEl.value,

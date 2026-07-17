@@ -6,6 +6,33 @@ import { useStore } from '../store'
 const store = useStore()
 const reach = store.reachability
 
+// Build a lookup map from API stop names to our station list names.
+// Keys are normalized (punctuation stripped, lowercased) for fuzzy matching against API responses.
+function normalizeStationKey(name: string): string {
+  return name.replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+const apiNameToStation: Map<string, string> = (() => {
+  const map = new Map<string, string>()
+  for (const s of stations) {
+    const key = normalizeStationKey(s.name)
+    map.set(key, s.name)
+    map.set(`${key} bahnhof`, s.name)
+    if (s.apiNames) {
+      for (const alias of s.apiNames) {
+        const aliasKey = normalizeStationKey(alias)
+        map.set(aliasKey, s.name)
+        map.set(`${aliasKey} bahnhof`, s.name)
+      }
+    }
+  }
+  return map
+})()
+
+function resolveStationName(apiName: string): string | undefined {
+  return apiNameToStation.get(normalizeStationKey(apiName))
+}
+
 const stationQuery = ref(reach.startStation || '')
 const showStationDropdown = ref(false)
 const isRunning = ref(false)
@@ -86,6 +113,7 @@ function parseISOTime(iso: string): string {
 interface StationboardEntry {
   stop: { departure: string }
   name: string
+  number: string
   category: string
   to: string
   passList?: Array<{
@@ -98,6 +126,11 @@ interface StationboardEntry {
 // Cache to avoid duplicate API calls for same station+time
 const apiCache = new Map<string, StationboardEntry[]>()
 
+// The Forchbahn (S18) is classified as tram (T18) in the transport.opendata.ch API.
+// For any station on the S18 line, we make a second tram-only call filtered to line 18.
+const FORCHBAHN_LINE = 'S18'
+const FORCHBAHN_API_NUMBER = '18'
+
 async function fetchStationboard(station: string, datetime: string): Promise<StationboardEntry[]> {
   const cacheKey = `${station}|${datetime}`
   const cached = apiCache.get(cacheKey)
@@ -107,12 +140,30 @@ async function fetchStationboard(station: string, datetime: string): Promise<Sta
     station,
     datetime,
     limit: '30',
-    'transportations[]': 'train',
   })
+  params.append('transportations[]', 'train')
   const resp = await fetch(`https://transport.opendata.ch/v1/stationboard?${params}`)
   if (!resp.ok) throw new Error(`API ${resp.status}: ${resp.statusText}`)
   const data = await resp.json()
-  const result: StationboardEntry[] = data.stationboard ?? []
+  let result: StationboardEntry[] = data.stationboard ?? []
+
+  if (store.getStationLines(station).includes(FORCHBAHN_LINE)) {
+    const tramParams = new URLSearchParams({
+      station,
+      datetime,
+      limit: '10',
+    })
+    tramParams.append('transportations[]', 'tram')
+    const tramResp = await fetch(`https://transport.opendata.ch/v1/stationboard?${tramParams}`)
+    if (tramResp.ok) {
+      const tramData = await tramResp.json()
+      const forchbahn = (tramData.stationboard ?? []).filter(
+        (e: StationboardEntry) => e.number === FORCHBAHN_API_NUMBER,
+      )
+      result = [...result, ...forchbahn]
+    }
+  }
+
   apiCache.set(cacheKey, result)
   return result
 }
@@ -157,12 +208,6 @@ async function run() {
       const arrMin = timeToMinutes(current.arrivalTime)
       if (arrMin > deadlineMin) continue
 
-      // Skip single-line stations — no transfers possible, already marked reachable
-      if (current.name !== reach.startStation && !isTransferStation(current.name)) {
-        reach.log.push(`Skip ${current.name} (single line)`)
-        continue
-      }
-
       // Skip stations with no line data — can't determine connectivity
       const lines = store.getStationLines(current.name)
       if (current.name !== reach.startStation && lines.length === 0) {
@@ -198,7 +243,8 @@ async function run() {
           if (stopArrMin > deadlineMin) break
           if (stopArrMin < depMin) continue
 
-          const name = stop.station.name
+          const name = resolveStationName(stop.station.name)
+          if (!name) continue
           if (visited.has(name)) continue
 
           // This station needs offset if the current path needed it OR this departure needed it
