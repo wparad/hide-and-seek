@@ -83,7 +83,6 @@ const categories: QuestionCategory[] = [
     id: 'thermometer',
     name: 'Thermometer',
     cost: 'Draw 2, Pick 1',
-    time: '5 min',
     question: 'I just travelled (at least) [Distance]. Am I hotter or colder?',
     items: [
       { id: 'thermometer-1', label: '1 km' },
@@ -95,7 +94,6 @@ const categories: QuestionCategory[] = [
     id: 'radar',
     name: 'Radar',
     cost: 'Draw 2, Pick 1',
-    time: '5 min',
     question: 'Are you within [Distance] of me?',
     items: [
       { id: 'radar-1', label: '400 m' },
@@ -110,7 +108,6 @@ const categories: QuestionCategory[] = [
     id: 'tentacles',
     name: 'Tentacles',
     cost: 'Draw 4, Pick 2',
-    time: '5 min',
     question: 'Of all the [Places] within [Distance] of me, which are you closest to?',
     availability: 'Medium & Up',
     items: [
@@ -129,7 +126,6 @@ const categories: QuestionCategory[] = [
     id: 'photos',
     name: 'Photos',
     cost: 'Draw 1',
-    time: '10 min',
     question: '',
     items: [
       {
@@ -254,12 +250,12 @@ function getCount(id: string): number {
 
 <template>
   <div class="questions-panel">
+    <p class="time-rule"><strong>Hider has 5 minutes to answer each question.</strong></p>
     <div v-for="cat in categories" :key="cat.id" class="category">
       <button class="category-header" @click="toggleCategory(cat)">
         <span class="category-name">{{ cat.name }}</span>
         <span class="category-meta">
           <span class="meta-pill">{{ cat.cost }}</span>
-          <span class="meta-pill">{{ cat.time }}</span>
         </span>
         <span class="chevron" :class="{ open: expandedCategories.has(cat.id) }">▸</span>
       </button>
@@ -285,7 +281,6 @@ function getCount(id: string): number {
         </div>
       </div>
     </div>
-
   </div>
 </template>
 
@@ -295,6 +290,12 @@ function getCount(id: string): number {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.time-rule {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: #333;
 }
 
 .category {

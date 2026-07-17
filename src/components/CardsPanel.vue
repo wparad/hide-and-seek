@@ -299,7 +299,28 @@ const deckCount = computed(() => state.value.deck.length)
 const handCount = computed(() => state.value.hand.length)
 const discardCount = computed(() => state.value.discard.length)
 
-const handCards = computed(() => state.value.hand.map((id) => cardMap.get(id)!).filter(Boolean))
+const handCards = computed(() => {
+  const cards = state.value.hand.map((id) => cardMap.get(id)!).filter(Boolean)
+  const categoryOrder: Record<string, number> = { powerup: 0, curse: 1, 'time-bonus': 2 }
+  const timeBonusOrder: Record<string, number> = {
+    Tiny: 0,
+    Small: 1,
+    Medium: 2,
+    Big: 3,
+    Massive: 4,
+  }
+  return cards.sort((a, b) => {
+    const catDiff = (categoryOrder[a.category] ?? 9) - (categoryOrder[b.category] ?? 9)
+    if (catDiff !== 0) return catDiff
+    if (a.category === 'time-bonus') {
+      return (timeBonusOrder[a.name] ?? 9) - (timeBonusOrder[b.name] ?? 9)
+    }
+    return a.name.localeCompare(b.name)
+  })
+})
+
+const handLimit = ref(6)
+const overLimit = computed(() => handCount.value > handLimit.value)
 
 // Draw modal
 const showDrawModal = ref(false)
@@ -416,17 +437,38 @@ function categoryLabel(cat: CardDef['category']): string {
     </div>
 
     <!-- Draw button -->
-    <button class="draw-btn" :disabled="deckCount === 0" @click="openDrawModal">Draw Cards</button>
+    <button
+      class="draw-btn"
+      :disabled="deckCount === 0 || overLimit"
+      @click="openDrawModal"
+    >
+      Draw Cards
+    </button>
+
+    <!-- Over limit error -->
+    <div v-if="overLimit" class="over-limit-error">
+      Hand exceeds maximum ({{ handCount }}/{{ handLimit }}) — discard before drawing
+    </div>
 
     <!-- Hand section -->
     <div class="hand-section">
-      <h3 class="hand-title">Hand</h3>
+      <div class="hand-header">
+        <h3 class="hand-title">Hand</h3>
+        <div class="hand-limit">
+          <span class="limit-label">Max:</span>
+          <select v-model.number="handLimit" class="limit-select">
+            <option :value="6">6</option>
+            <option :value="7">7</option>
+            <option :value="8">8</option>
+          </select>
+        </div>
+      </div>
       <div v-if="handCards.length === 0" class="empty-hand">No cards in hand</div>
       <div v-else class="hand-list">
         <div
           v-for="card in handCards"
           :key="card.id"
-          :class="['hand-card', `border-${card.category}`]"
+          :class="['hand-card', `border-${card.category}`, { 'over-limit': overLimit }]"
           @click="openDetail(card)"
         >
           <div class="card-info">
@@ -556,10 +598,24 @@ function categoryLabel(cat: CardDef['category']): string {
   cursor: not-allowed;
 }
 
+.over-limit-error {
+  font-size: 14px;
+  font-weight: 700;
+  color: #dc2626;
+  text-align: center;
+  padding: 8px;
+}
+
 .hand-section {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.hand-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .hand-title {
@@ -567,6 +623,25 @@ function categoryLabel(cat: CardDef['category']): string {
   font-size: 14px;
   font-weight: 600;
   color: #333;
+}
+
+.hand-limit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.limit-label {
+  font-size: 12px;
+  color: #666;
+}
+
+.limit-select {
+  padding: 2px 4px;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  font-size: 13px;
+  background: #fff;
 }
 
 .empty-hand {
@@ -604,6 +679,10 @@ function categoryLabel(cat: CardDef['category']): string {
 
 .hand-card.border-curse {
   border-left-color: #8b5cf6;
+}
+
+.hand-card.over-limit {
+  background: #fca5a5;
 }
 
 .card-info {

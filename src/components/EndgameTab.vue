@@ -816,7 +816,7 @@ const exclusionRadiusLabel = computed(() => {
           ✏️
         </button>
         <template v-if="drawMode">
-          <button class="draw-btn" @click="clearDrawing">🧽</button>
+          <button class="draw-btn" @click="clearDrawing"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h10c4 0 6 2 6 5s-2 5-6 5H9" /><polyline points="7 6 3 10 7 14" /></svg></button>
           <button class="draw-btn" @click="saveDrawing">💾</button>
         </template>
       </div>

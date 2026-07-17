@@ -3,16 +3,13 @@ import { ref } from 'vue'
 import CardsPanel from './CardsPanel.vue'
 import QuestionsPanel from './QuestionsPanel.vue'
 
-const mode = ref<'kb' | 'questions' | 'cards'>('kb')
-const searchQuery = ref('')
+const mode = ref<'questions' | 'cards'>('questions')
 </script>
 
 <template>
   <div class="rules-tab">
     <div class="rules-header">
-      <input v-model="searchQuery" type="text" class="rules-search" placeholder="Search rules…" />
       <div class="mode-toggle">
-        <button :class="['mode-btn', { active: mode === 'kb' }]" @click="mode = 'kb'">KB</button>
         <button :class="['mode-btn', { active: mode === 'questions' }]" @click="mode = 'questions'">
           Questions
         </button>
@@ -23,11 +20,7 @@ const searchQuery = ref('')
     </div>
 
     <div class="rules-content">
-      <div v-if="mode === 'kb'" class="placeholder">
-        <span class="placeholder-icon">📖</span>
-        <p>Knowledge base coming soon</p>
-      </div>
-      <div v-else-if="mode === 'questions'">
+      <div v-if="mode === 'questions'">
         <QuestionsPanel />
       </div>
       <div v-else>
