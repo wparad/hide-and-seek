@@ -803,9 +803,7 @@ function updateGpsMarker() {
     const el = document.createElement('div')
     el.style.cssText =
       'width:16px;height:16px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 0 6px rgba(59,130,246,0.6);pointer-events:none;'
-    gpsMarker = new maplibregl.Marker({ element: el })
-      .setLngLat(userPosition.value)
-      .addTo(map)
+    gpsMarker = new maplibregl.Marker({ element: el }).setLngLat(userPosition.value).addTo(map)
   } else {
     gpsMarker.setLngLat(userPosition.value)
   }
@@ -1554,27 +1552,33 @@ watch(userPosition, () => {
       </div>
     </div>
 
-    <div v-if="showHistory" class="history-panel">
-      <div class="history-header">
-        <span class="history-title">📜 History</span>
-        <button class="history-close" @click="showHistory = false">✕</button>
-      </div>
-      <div class="history-list">
-        <div
-          v-for="event in [...store.stationHistory].reverse()"
-          :key="event.id"
-          class="history-event"
-        >
-          <span :class="['history-type', event.type]">
-            {{ event.type === 'cross-off' ? '✗' : '✓' }}
-          </span>
-          <span class="history-name">{{ event.name }}</span>
-          <span v-if="event.reason" class="history-reason">{{ event.reason }}</span>
-          <button class="history-undo" @click="store.removeStationEvent(event.id)">↩</button>
+    <Teleport to="body">
+      <div v-if="showHistory" class="overlay" @click.self="showHistory = false">
+        <div class="history-panel">
+          <div class="history-header">
+            <span class="history-title">📜 History</span>
+            <button class="history-close" @click="showHistory = false">✕</button>
+          </div>
+          <div class="history-list">
+            <div
+              v-for="event in [...store.stationHistory].reverse()"
+              :key="event.id"
+              class="history-event"
+            >
+              <div class="history-event-main">
+                <span :class="['history-type', event.type]">
+                  {{ event.type === 'cross-off' ? '✗' : '✓' }}
+                </span>
+                <span class="history-name">{{ event.name }}</span>
+                <button class="history-undo" @click="store.removeStationEvent(event.id)">↩</button>
+              </div>
+              <div v-if="event.reason" class="history-reason">{{ event.reason }}</div>
+            </div>
+            <div v-if="store.stationHistory.length === 0" class="history-empty">No history yet</div>
+          </div>
         </div>
-        <div v-if="store.stationHistory.length === 0" class="history-empty">No history yet</div>
       </div>
-    </div>
+    </Teleport>
 
     <Teleport to="body">
       <div v-if="showReasonModal" class="overlay" @click.self="cancelMapCrossOff">
@@ -1668,12 +1672,12 @@ watch(userPosition, () => {
 }
 
 .menu-trigger {
-  width: 40px;
-  height: 40px;
+  width: 60px;
+  height: 60px;
   border-radius: 50%;
   background: #fff;
   border: 1px solid #ddd;
-  font-size: 22px;
+  font-size: 32px;
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
@@ -1695,11 +1699,11 @@ watch(userPosition, () => {
 }
 
 .menu-item {
-  padding: 8px 14px;
+  padding: 10px 16px;
   background: #fff;
   border: 1px solid #ddd;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 19.5px;
   font-weight: 600;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -1790,15 +1794,13 @@ watch(userPosition, () => {
 }
 
 .history-panel {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 280px;
-  max-height: 60%;
+  width: 80vw;
+  height: 80vh;
+  max-width: 80vw;
+  max-height: 80vh;
   background: #fff;
   border-radius: 10px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  z-index: 10;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1833,15 +1835,21 @@ watch(userPosition, () => {
 
 .history-event {
   display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 14px;
+}
+
+.history-event-main {
+  display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
-  border-bottom: 1px solid #f0f0f0;
-  font-size: 13px;
 }
 
 .history-type {
-  font-size: 14px;
+  font-size: 15px;
   flex-shrink: 0;
 }
 
@@ -1860,12 +1868,11 @@ watch(userPosition, () => {
 }
 
 .history-reason {
-  font-size: 11px;
+  font-size: 12px;
   color: #888;
-  max-width: 80px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding-left: 23px;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .history-undo {

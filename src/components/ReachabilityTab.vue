@@ -9,7 +9,11 @@ const reach = store.reachability
 // Build a lookup map from API stop names to our station list names.
 // Keys are normalized (punctuation stripped, lowercased) for fuzzy matching against API responses.
 function normalizeStationKey(name: string): string {
-  return name.replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim().toLowerCase()
+  return name
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
 }
 
 const apiNameToStation: Map<string, string> = (() => {
@@ -40,7 +44,10 @@ const error = ref('')
 const sortBy = ref<'arrival' | 'station'>('arrival')
 
 function normalizeSearch(str: string): string {
-  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  return str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
 }
 
 function getCurrentTime(): string {
@@ -81,7 +88,9 @@ function onStationFocus() {
 }
 
 function onStationBlur() {
-  setTimeout(() => { showStationDropdown.value = false }, 150)
+  setTimeout(() => {
+    showStationDropdown.value = false
+  }, 150)
 }
 
 function onStationInput() {
@@ -598,7 +607,9 @@ function applyToStations() {
   background: #e44;
   color: #fff;
   cursor: pointer;
-  transition: background 0.3s, transform 0.2s;
+  transition:
+    background 0.3s,
+    transform 0.2s;
 }
 
 .apply-btn.apply-done {
