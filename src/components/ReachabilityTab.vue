@@ -289,9 +289,16 @@ async function run() {
   }
 }
 
+const applyState = ref<'idle' | 'done'>('idle')
+
 function applyToStations() {
   const names = unreachableStations.value.map((s) => s.name)
   store.crossOffAll(names, 'Unreachable (auto)')
+  applyState.value = 'done'
+  setTimeout(() => {
+    store.setTab('map')
+    applyState.value = 'idle'
+  }, 1200)
 }
 </script>
 
@@ -391,7 +398,13 @@ function applyToStations() {
 
       <div class="results-header">
         <h3>Unreachable ({{ unreachableStations.length }})</h3>
-        <button class="apply-btn" @click="applyToStations">Apply — mark off unreachable</button>
+        <button
+          :class="['apply-btn', { 'apply-done': applyState === 'done' }]"
+          :disabled="applyState === 'done'"
+          @click="applyToStations"
+        >
+          {{ applyState === 'done' ? '✓ Complete' : 'Apply — mark off unreachable' }}
+        </button>
       </div>
       <ul class="unreachable-list">
         <li v-for="s in unreachableStations" :key="s.name">{{ s.name }}</li>
@@ -585,6 +598,13 @@ function applyToStations() {
   background: #e44;
   color: #fff;
   cursor: pointer;
+  transition: background 0.3s, transform 0.2s;
+}
+
+.apply-btn.apply-done {
+  background: #22c55e;
+  transform: scale(1.05);
+  cursor: default;
 }
 
 table {
