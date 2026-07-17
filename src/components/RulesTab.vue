@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import CardsPanel from './CardsPanel.vue'
 
-const mode = ref<'kb' | 'questions'>('kb')
+const mode = ref<'kb' | 'questions' | 'cards'>('kb')
 const searchQuery = ref('')
 </script>
 
@@ -14,6 +15,9 @@ const searchQuery = ref('')
         <button :class="['mode-btn', { active: mode === 'questions' }]" @click="mode = 'questions'">
           Questions
         </button>
+        <button :class="['mode-btn', { active: mode === 'cards' }]" @click="mode = 'cards'">
+          Cards
+        </button>
       </div>
     </div>
 
@@ -22,9 +26,12 @@ const searchQuery = ref('')
         <span class="placeholder-icon">📖</span>
         <p>Knowledge base coming soon</p>
       </div>
-      <div v-else class="placeholder">
+      <div v-else-if="mode === 'questions'" class="placeholder">
         <span class="placeholder-icon">❓</span>
         <p>Questions coming soon</p>
+      </div>
+      <div v-else>
+        <CardsPanel />
       </div>
     </div>
   </div>

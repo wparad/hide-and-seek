@@ -9,6 +9,11 @@ import SettingsTab from './components/SettingsTab.vue'
 
 const store = useStore()
 
+// Navigate to endgame tab if URL has ?endgame= param
+if (new URLSearchParams(window.location.search).has('endgame')) {
+  store.setTab('endgame')
+}
+
 type Tab = 'map' | 'stations' | 'reachability' | 'endgame' | 'rules' | 'settings'
 
 const tabs: { id: Tab; label: string; icon: string }[] = [

@@ -6,10 +6,15 @@ import { useStore } from '../store'
 const store = useStore()
 const reach = store.reachability
 
-const stationQuery = ref('')
+const stationQuery = ref(reach.startStation || '')
+const showStationDropdown = ref(false)
 const isRunning = ref(false)
 const error = ref('')
 const sortBy = ref<'arrival' | 'station'>('arrival')
+
+function normalizeSearch(str: string): string {
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+}
 
 function getCurrentTime(): string {
   const now = new Date()
@@ -17,10 +22,9 @@ function getCurrentTime(): string {
 }
 
 const filteredStationOptions = computed(() => {
-  const q = stationQuery.value.toLowerCase().trim()
-  const names = stations.map((s) => s.name).sort()
-  if (!q) return names
-  return names.filter((n) => n.toLowerCase().includes(q))
+  const q = normalizeSearch(stationQuery.value)
+  if (!q) return stations
+  return stations.filter((s) => normalizeSearch(s.name).includes(q))
 })
 
 const unreachableStations = computed(() =>
@@ -41,6 +45,20 @@ const sortedReachable = computed(() => {
 function selectStation(name: string) {
   reach.startStation = name
   stationQuery.value = name
+  showStationDropdown.value = false
+}
+
+function onStationFocus() {
+  showStationDropdown.value = true
+  stationQuery.value = ''
+}
+
+function onStationBlur() {
+  setTimeout(() => { showStationDropdown.value = false }, 150)
+}
+
+function onStationInput() {
+  showStationDropdown.value = true
 }
 
 function isTransferStation(name: string): boolean {
@@ -236,17 +254,30 @@ function applyToStations() {
     <div class="inputs">
       <label>
         Station
-        <input
-          v-model="stationQuery"
-          type="text"
-          placeholder="Type to search..."
-          list="station-options"
-          @change="selectStation(stationQuery)"
-        />
-        <datalist id="station-options">
-          <option v-for="name in filteredStationOptions" :key="name" :value="name" />
-        </datalist>
-        <span v-if="reach.startStation" class="selected-badge">{{ reach.startStation }}</span>
+        <div class="station-search">
+          <input
+            v-model="stationQuery"
+            type="text"
+            class="station-input"
+            placeholder="Search station…"
+            @focus="onStationFocus"
+            @blur="onStationBlur"
+            @input="onStationInput"
+          />
+          <ul v-if="showStationDropdown" class="station-dropdown">
+            <li
+              v-for="s in filteredStationOptions"
+              :key="s.name"
+              :class="['station-option', { selected: s.name === reach.startStation }]"
+              @mousedown.prevent="selectStation(s.name)"
+            >
+              {{ s.name }}
+            </li>
+            <li v-if="filteredStationOptions.length === 0" class="station-option no-results">
+              No matches
+            </li>
+          </ul>
+        </div>
       </label>
       <label>
         Depart at
@@ -394,6 +425,57 @@ function applyToStations() {
 
 .inputs > button:disabled {
   opacity: 0.5;
+}
+
+.station-search {
+  position: relative;
+}
+
+.station-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  font-size: 15px;
+  background: #fff;
+}
+
+.station-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  list-style: none;
+  z-index: 20;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  padding: 0;
+  margin: 0;
+}
+
+.station-option {
+  padding: 8px 12px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.station-option:hover {
+  background: #f0f7ff;
+}
+
+.station-option.selected {
+  background: #e8f0fe;
+  font-weight: 600;
+}
+
+.station-option.no-results {
+  color: #999;
+  cursor: default;
 }
 
 .row {

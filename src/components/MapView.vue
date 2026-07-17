@@ -4,6 +4,7 @@ import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { useStore, type MapLayerVisibility } from '../store'
 import { stations, locations, buildGeoLines } from '../stations'
+import { userPosition } from '../gps'
 
 const store = useStore()
 const mapEl = ref<HTMLDivElement | null>(null)
@@ -12,6 +13,23 @@ const hideCrossedOff = ref(false)
 const showLocations = ref(true)
 const menuOpen = ref(false)
 const showHistory = ref(false)
+const stationSearch = ref('')
+const hideNonMatching = ref(false)
+const hideTrainLines = ref(false)
+
+function normalizeSearch(str: string): string {
+  return str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+}
+
+const searchMatchingStations = computed(() => {
+  const q = normalizeSearch(stationSearch.value)
+  if (!q) return new Set<string>()
+  return new Set(stations.filter((s) => normalizeSearch(s.name).includes(q)).map((s) => s.name))
+})
+
 let map: maplibregl.Map | null = null
 let popup: maplibregl.Popup | null = null
 let popupStation: string | null = null
@@ -59,8 +77,6 @@ let arrowHeadA: maplibregl.Marker | null = null
 let arrowHeadB: maplibregl.Marker | null = null
 
 // GPS location state
-const userLocation = ref<[number, number] | null>(null)
-let gpsWatchId: number | null = null
 let gpsMarker: maplibregl.Marker | null = null
 
 const LAYER_GROUPS: Record<keyof MapLayerVisibility, RegExp> = {
@@ -94,7 +110,7 @@ function openPopup(name: string, lngLat: maplibregl.LngLatLike) {
   if (!map) return
   popupStation = name
   popup?.remove()
-  popup = new maplibregl.Popup({ closeButton: true, maxWidth: '240px' })
+  popup = new maplibregl.Popup({ closeButton: true, maxWidth: '320px' })
     .setLngLat(lngLat)
     .setHTML(buildPopupHTML(name))
     .addTo(map)
@@ -114,7 +130,7 @@ function buildPopupHTML(name: string): string {
     <div class="map-popup">
       <div class="map-popup-header">
         <div class="map-popup-name">${name}</div>
-        <button class="map-popup-fav${fav ? ' active' : ''}" data-action="favorite">${fav ? '★' : '☆'}</button>
+        <button class="map-popup-fav${fav ? ' active' : ''}" data-action="favorite">${fav ? '★ Fav' : '☆ Fav'}</button>
       </div>
       <div class="map-popup-lines">${linesText}</div>
       ${reasonHtml}
@@ -122,9 +138,12 @@ function buildPopupHTML(name: string): string {
         <input type="checkbox" data-action="toggle" ${crossed ? '' : 'checked'} />
         <span>${crossed ? 'Marked off' : 'Available'}</span>
       </label>
-      <a class="map-popup-link" href="https://www.google.com/search?q=${query}" target="_blank" rel="noopener">
-        Search Google
-      </a>
+      <div class="map-popup-actions">
+        <a class="map-popup-link" href="https://www.google.com/search?q=${query}" target="_blank" rel="noopener">
+          Search Google
+        </a>
+        <a class="map-popup-endgame" href="?endgame=${encodeURIComponent(name)}" data-action="endgame">🎯 Endgame</a>
+      </div>
     </div>
   `
 }
@@ -143,7 +162,24 @@ function onPopupClick(e: Event) {
       showReasonModal.value = true
     }
   }
-  if (target.dataset.action === 'favorite' && popupStation) store.toggleFavorite(popupStation)
+  if (target.dataset.action === 'favorite' && popupStation) {
+    store.toggleFavorite(popupStation)
+    refreshPopup()
+  }
+  if (target.dataset.action === 'endgame' && popupStation) {
+    e.preventDefault()
+    // Update URL so it's shareable / navigable
+    const url = new URL(window.location.href)
+    url.searchParams.set('endgame', popupStation)
+    history.pushState(null, '', url)
+    // Save the selected station to endgame localStorage and reset map position
+    const endgameState = JSON.parse(localStorage.getItem('hide-and-seek-endgame') ?? '{}')
+    endgameState.station = popupStation
+    endgameState.center = null
+    endgameState.zoom = 0
+    localStorage.setItem('hide-and-seek-endgame', JSON.stringify(endgameState))
+    store.setTab('endgame')
+  }
 }
 
 function confirmMapCrossOff() {
@@ -727,7 +763,7 @@ function loadBisectFromUrl(): boolean {
 
 function getDefaultBisectCenter(): [number, number] {
   // 250m left (west) of user GPS, or map center [8.55, 47.38]
-  const base: [number, number] = userLocation.value ?? [8.55, 47.38]
+  const base: [number, number] = userPosition.value ?? [8.55, 47.38]
   const offsetLng = -250 / (111320 * Math.cos((base[1] * Math.PI) / 180))
   return [base[0] + offsetLng, base[1]]
 }
@@ -750,44 +786,26 @@ function reverseEndpoints() {
 }
 
 function determineStartEndFromGps() {
-  if (!scissorCenter.value || !userLocation.value) return
+  if (!scissorCenter.value || !userPosition.value) return
   const endpoints = getScissorEndpoints()
   if (!endpoints) return
-  const distA = haversineMeters(userLocation.value, endpoints[0])
-  const distB = haversineMeters(userLocation.value, endpoints[1])
+  const distA = haversineMeters(userPosition.value, endpoints[0])
+  const distB = haversineMeters(userPosition.value, endpoints[1])
   // Start = closer to GPS. Default: B is start. If A is closer, reverse.
   scissorReversed.value = distA < distB
 }
 
-function initGps() {
-  if (!navigator.geolocation) return
-  gpsWatchId = navigator.geolocation.watchPosition(
-    (pos) => {
-      userLocation.value = [pos.coords.longitude, pos.coords.latitude]
-      updateGpsMarker()
-    },
-    () => {
-      // permission denied or error — no-op
-    },
-    { enableHighAccuracy: true },
-  )
-}
-
-function createGpsMarkerEl(): HTMLDivElement {
-  const el = document.createElement('div')
-  el.style.cssText =
-    'width:16px;height:16px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 0 6px rgba(59,130,246,0.6);pointer-events:none;'
-  return el
-}
-
 function updateGpsMarker() {
-  if (!map || !userLocation.value) return
+  if (!map || !userPosition.value) return
   if (!gpsMarker) {
-    gpsMarker = new maplibregl.Marker({ element: createGpsMarkerEl() })
-      .setLngLat(userLocation.value)
+    const el = document.createElement('div')
+    el.style.cssText =
+      'width:16px;height:16px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 0 6px rgba(59,130,246,0.6);pointer-events:none;'
+    gpsMarker = new maplibregl.Marker({ element: el })
+      .setLngLat(userPosition.value)
       .addTo(map)
   } else {
-    gpsMarker.setLngLat(userLocation.value)
+    gpsMarker.setLngLat(userPosition.value)
   }
 }
 
@@ -831,6 +849,14 @@ function buildGeoJSON(): GeoJSON.FeatureCollection {
     features: stations
       .filter((s) => !store.favorites.includes(s.name))
       .filter((s) => !(hideCrossedOff.value && stationStatus(s.name) === 'crossed-off'))
+      .filter(
+        (s) =>
+          !(
+            hideNonMatching.value &&
+            stationSearch.value &&
+            !searchMatchingStations.value.has(s.name)
+          ),
+      )
       .map((s) => ({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: s.coordinates },
@@ -853,6 +879,14 @@ function buildFavGeoJSON(): GeoJSON.FeatureCollection {
     features: stations
       .filter((s) => store.favorites.includes(s.name))
       .filter((s) => !(hideCrossedOff.value && stationStatus(s.name) === 'crossed-off'))
+      .filter(
+        (s) =>
+          !(
+            hideNonMatching.value &&
+            stationSearch.value &&
+            !searchMatchingStations.value.has(s.name)
+          ),
+      )
       .map((s) => ({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: s.coordinates },
@@ -867,6 +901,33 @@ function buildFavGeoJSON(): GeoJSON.FeatureCollection {
         },
       })),
   }
+}
+
+function buildSearchHighlightGeoJSON(): GeoJSON.FeatureCollection {
+  if (searchMatchingStations.value.size === 0) {
+    return { type: 'FeatureCollection', features: [] }
+  }
+  const features = stations
+    .filter((s) => searchMatchingStations.value.has(s.name))
+    .map((s) => {
+      const points = 64
+      const coords: [number, number][] = []
+      const km = 0.5
+      for (let i = 0; i <= points; i++) {
+        const angle = (i / points) * 2 * Math.PI
+        const dx = km * Math.cos(angle)
+        const dy = km * Math.sin(angle)
+        const lng = s.coordinates[0] + dx / (111.32 * Math.cos((s.coordinates[1] * Math.PI) / 180))
+        const lat = s.coordinates[1] + dy / 110.574
+        coords.push([lng, lat])
+      }
+      return {
+        type: 'Feature' as const,
+        geometry: { type: 'Polygon' as const, coordinates: [coords] },
+        properties: { name: s.name },
+      }
+    })
+  return { type: 'FeatureCollection', features }
 }
 
 function buildLinesGeoJSON(): GeoJSON.FeatureCollection {
@@ -990,7 +1051,6 @@ function niceKmInterval(totalKm: number): number {
 
 onMounted(() => {
   if (!mapEl.value) return
-  initGps()
 
   map = new maplibregl.Map({
     container: mapEl.value,
@@ -1011,6 +1071,23 @@ onMounted(() => {
     if (!map) return
 
     map.addSource('lines', { type: 'geojson', data: buildLinesGeoJSON() })
+    map.addSource('search-highlights', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    })
+    map.addLayer({
+      id: 'search-highlights-fill',
+      type: 'fill',
+      source: 'search-highlights',
+      paint: { 'fill-color': '#3b82f6', 'fill-opacity': 0.15 },
+    })
+    map.addLayer({
+      id: 'search-highlights-outline',
+      type: 'line',
+      source: 'search-highlights',
+      paint: { 'line-color': '#3b82f6', 'line-width': 2 },
+    })
+
     map.addSource('stations', { type: 'geojson', data: buildGeoJSON() })
     map.addSource('favorites', { type: 'geojson', data: buildFavGeoJSON() })
     map.addSource('radius-circle', {
@@ -1251,7 +1328,6 @@ onUnmounted(() => {
   arrowHeadA?.remove()
   arrowHeadB?.remove()
   gpsMarker?.remove()
-  if (gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId)
   map?.remove()
   map = null
 })
@@ -1313,6 +1389,31 @@ watch(showLocations, (visible) => {
   map.setLayoutProperty('locations-layer', 'visibility', v)
   map.setLayoutProperty('locations-labels', 'visibility', v)
 })
+
+watch(stationSearch, () => {
+  const source = map?.getSource('search-highlights') as maplibregl.GeoJSONSource | undefined
+  if (source) source.setData(buildSearchHighlightGeoJSON())
+  if (hideNonMatching.value) {
+    ;(map?.getSource('stations') as maplibregl.GeoJSONSource | undefined)?.setData(buildGeoJSON())
+    ;(map?.getSource('favorites') as maplibregl.GeoJSONSource | undefined)?.setData(
+      buildFavGeoJSON(),
+    )
+  }
+})
+
+watch(hideNonMatching, () => {
+  ;(map?.getSource('stations') as maplibregl.GeoJSONSource | undefined)?.setData(buildGeoJSON())
+  ;(map?.getSource('favorites') as maplibregl.GeoJSONSource | undefined)?.setData(buildFavGeoJSON())
+})
+
+watch(hideTrainLines, (hidden) => {
+  if (!map) return
+  map.setLayoutProperty('lines-layer', 'visibility', hidden ? 'none' : 'visible')
+})
+
+watch(userPosition, () => {
+  updateGpsMarker()
+})
 </script>
 
 <template>
@@ -1353,7 +1454,30 @@ watch(showLocations, (visible) => {
         >
           📜 History
         </button>
+        <button
+          :class="['menu-item', { active: hideTrainLines }]"
+          @click="hideTrainLines = !hideTrainLines"
+        >
+          🚂 Hide lines
+        </button>
       </div>
+    </div>
+
+    <div class="search-panel">
+      <input
+        v-model="stationSearch"
+        type="text"
+        class="search-input"
+        placeholder="Search stations…"
+      />
+      <label v-if="stationSearch" class="search-toggle">
+        <input
+          type="checkbox"
+          :checked="hideNonMatching"
+          @change="hideNonMatching = !hideNonMatching"
+        />
+        <span>Hide non-matching</span>
+      </label>
     </div>
 
     <div v-if="radiusMode" class="radius-panel">
@@ -1488,6 +1612,46 @@ watch(showLocations, (visible) => {
   inset: 0;
   pointer-events: none;
   z-index: 5;
+}
+
+.search-panel {
+  position: absolute;
+  top: 12px;
+  left: 50px;
+  right: 60px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.search-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #fff;
+  border-radius: 6px;
+  font-size: 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.search-toggle input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  accent-color: #3b82f6;
 }
 
 .map-controls {
@@ -1876,17 +2040,19 @@ watch(showLocations, (visible) => {
 <style>
 .map-popup {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  padding: 4px 2px;
+  padding: 8px 4px;
 }
 
 .maplibregl-popup-close-button {
-  font-size: 24px;
-  width: 36px;
-  height: 36px;
-  line-height: 36px;
+  font-size: 28px;
+  width: 44px;
+  height: 44px;
+  line-height: 44px;
   text-align: center;
   padding: 0;
   -webkit-tap-highlight-color: transparent;
+  top: 0;
+  right: 0;
 }
 
 .map-popup-header {
@@ -1904,17 +2070,20 @@ watch(showLocations, (visible) => {
 
 .map-popup-fav {
   background: none;
-  border: none;
-  font-size: 18px;
-  color: #ccc;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #888;
   cursor: pointer;
-  padding: 0;
+  padding: 6px 10px;
   line-height: 1;
   flex-shrink: 0;
 }
 
 .map-popup-fav.active {
   color: #f59e0b;
+  border-color: #f59e0b;
+  background: #fef3c7;
 }
 
 .map-popup-lines {
@@ -1955,5 +2124,23 @@ watch(showLocations, (visible) => {
 
 .map-popup-link:hover {
   text-decoration: underline;
+}
+
+.map-popup-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.map-popup-endgame {
+  background: none;
+  border: 1px solid #7c3aed;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: #7c3aed;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
 }
 </style>

@@ -4,6 +4,7 @@ import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { stations } from '../stations'
 import { useStore } from '../store'
+import { userPosition } from '../gps'
 
 const STORAGE_KEY = 'hide-and-seek-endgame'
 
@@ -48,9 +49,13 @@ const placingMode = ref(false)
 const showClearExclModal = ref(false)
 const mapEl = ref<HTMLDivElement | null>(null)
 const rulerCanvas = ref<HTMLCanvasElement | null>(null)
-const closestStationName = ref<string | null>(null)
+const closestStationName = computed(() => {
+  if (!userPosition.value) return null
+  return findClosestStation(userPosition.value)
+})
 let map: maplibregl.Map | null = null
 let constraining = false
+let gpsMarker: maplibregl.Marker | null = null
 const store = useStore()
 
 function haversineMeters(a: [number, number], b: [number, number]): number {
@@ -83,19 +88,28 @@ function useClosestStation() {
   }
 }
 
-// GPS: auto-detect closest station on first load if no station was saved
-function initGps() {
-  if (!navigator.geolocation) return
-  navigator.geolocation.getCurrentPosition((pos) => {
-    const lngLat: [number, number] = [pos.coords.longitude, pos.coords.latitude]
-    closestStationName.value = findClosestStation(lngLat)
-    // Auto-select if the saved station is the default (first in array = never explicitly chosen)
-    if (selectedStation.value === stations[0].name && saved.station === stations[0].name) {
-      selectStation(closestStationName.value)
-    }
-  })
+// GPS marker: watch global position and update marker on the endgame map
+function updateGpsMarker() {
+  if (!map || !userPosition.value) return
+  if (!gpsMarker) {
+    const el = document.createElement('div')
+    el.style.cssText = 'width:16px;height:16px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 0 6px rgba(59,130,246,0.6);pointer-events:none;'
+    gpsMarker = new maplibregl.Marker({ element: el })
+      .setLngLat(userPosition.value)
+      .addTo(map)
+  } else {
+    gpsMarker.setLngLat(userPosition.value)
+  }
 }
-initGps()
+
+const pendingUrlStation = new URLSearchParams(window.location.search).get('endgame')
+
+// Remove ?endgame= from URL immediately (consumed in onMounted via selectStation)
+if (pendingUrlStation) {
+  const url = new URL(window.location.href)
+  url.searchParams.delete('endgame')
+  history.replaceState(null, '', url)
+}
 
 function normalize(str: string): string {
   return str
@@ -508,11 +522,18 @@ onMounted(() => {
     })
 
     drawRuler()
+
+    // If URL had ?endgame=StationName, select it now (same path as dropdown)
+    if (pendingUrlStation) {
+      const match = stations.find((s) => s.name === pendingUrlStation)
+      if (match) selectStation(match.name)
+    }
   })
 })
 
 onUnmounted(() => {
   persist()
+  gpsMarker?.remove()
   map?.remove()
   map = null
 })
@@ -539,6 +560,15 @@ watch(radiusKm, () => {
   const source = map?.getSource('hiding-zone') as maplibregl.GeoJSONSource | undefined
   if (source) source.setData(buildHidingZoneGeoJSON())
   persist()
+})
+
+watch(userPosition, () => {
+  updateGpsMarker()
+  // Auto-select closest station on first GPS fix if no explicit selection
+  if (userPosition.value && selectedStation.value === stations[0].name && saved.station === stations[0].name && !pendingUrlStation) {
+    const closest = findClosestStation(userPosition.value)
+    selectStation(closest)
+  }
 })
 
 const radiusLabel = computed(() => {
@@ -572,6 +602,9 @@ const exclusionRadiusLabel = computed(() => {
             <button v-if="closestStationName" class="use-current-btn" @click="useClosestStation">
               📍 {{ closestStationName }}
             </button>
+            <button v-else class="use-current-btn" disabled>
+              ⏳ Locating…
+            </button>
           </div>
           <ul v-if="showDropdown" class="station-dropdown">
             <li
@@ -588,6 +621,15 @@ const exclusionRadiusLabel = computed(() => {
           </ul>
         </div>
       </label>
+
+      <a
+        class="gmaps-link"
+        :href="`https://www.google.com/maps/@${station.coordinates[1]},${station.coordinates[0]},16z`"
+        target="_blank"
+        rel="noopener"
+      >
+        Google Maps ↗
+      </a>
 
       <label class="endgame-field">
         <span class="endgame-label">Hiding Zone Radius: {{ radiusLabel }}</span>
@@ -732,6 +774,18 @@ const exclusionRadiusLabel = computed(() => {
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.gmaps-link {
+  display: inline;
+  font-size: 13px;
+  color: #0066cc;
+  text-decoration: none;
+  align-self: flex-start;
+}
+
+.gmaps-link:active {
+  text-decoration: underline;
 }
 
 .station-dropdown {
