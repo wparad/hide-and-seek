@@ -119,11 +119,11 @@ function confirmReset() {
       <h2 class="section-title">ZVV</h2>
       <a
         class="link-item"
-        href="https://www.zvv.ch/content/dam/zvv/publikationen/liniennetzplaene/all.pdf"
+        href="https://github.com/wparad/hide-and-seek/blob/main/data/all.pdf?raw=true"
         target="_blank"
         rel="noopener"
       >
-        <span class="link-label">ZVV Tarifzonen (PDF)</span>
+        <span class="link-label">Official Map (To Scale)</span>
         <span class="link-arrow">→</span>
       </a>
       <a
@@ -132,7 +132,7 @@ function confirmReset() {
         target="_blank"
         rel="noopener"
       >
-        <span class="link-label">ZVV Map (repo backup)</span>
+        <span class="link-label">Transit Map — Readable</span>
         <span class="link-arrow">→</span>
       </a>
     </section>
