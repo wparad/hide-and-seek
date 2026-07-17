@@ -4,10 +4,30 @@ import { useStore, type MapLayerVisibility } from '../store'
 
 const buildSha = __BUILD_SHA__
 const buildDate = __BUILD_DATE__
+const buildNumber = __BUILD_NUMBER__
+
+const localBuildDate = (() => {
+  const d = new Date(buildDate)
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  })
+})()
 
 const store = useStore()
 
 const showResetConfirm = ref(false)
+
+async function clearMapCache() {
+  const deleted = await caches.delete('map-tiles')
+  if (deleted) {
+    alert('Map cache cleared')
+  }
+}
 
 const mapLayerLabels: { key: keyof MapLayerVisibility; label: string }[] = [
   { key: 'roads', label: 'Roads & highways' },
@@ -80,7 +100,9 @@ function confirmReset() {
     </section>
 
     <section class="build-info">
-      <span>{{ buildSha }} · {{ buildDate }}</span>
+      <div><span class="build-label">Build:</span> #{{ buildNumber }}</div>
+      <div><span class="build-label">Commit:</span> {{ buildSha }}</div>
+      <div><span class="build-label">Built:</span> {{ localBuildDate }}</div>
     </section>
 
     <Teleport to="body">
@@ -236,5 +258,11 @@ function confirmReset() {
   text-align: center;
   font-size: 11px;
   color: #aaa;
+  line-height: 1.8;
+}
+
+.build-label {
+  font-weight: 600;
+  color: #999;
 }
 </style>

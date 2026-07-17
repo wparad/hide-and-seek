@@ -7,8 +7,10 @@ import { stations, locations, buildGeoLines } from '../stations'
 
 const store = useStore()
 const mapEl = ref<HTMLDivElement | null>(null)
+const rulerCanvas = ref<HTMLCanvasElement | null>(null)
 const hideCrossedOff = ref(false)
 const showLocations = ref(true)
+const menuOpen = ref(false)
 let map: maplibregl.Map | null = null
 let popup: maplibregl.Popup | null = null
 let popupStation: string | null = null
@@ -891,6 +893,98 @@ function buildLocationsGeoJSON(): GeoJSON.FeatureCollection {
   }
 }
 
+function getZoomForWidthKm(lat: number, widthKm: number, containerWidth: number): number {
+  const cosLat = Math.cos((lat * Math.PI) / 180)
+  const pow = (40075 * cosLat * containerWidth) / (512 * widthKm)
+  return Math.log2(pow)
+}
+
+function getWidthKmForZoom(lat: number, zoom: number, containerPx: number): number {
+  const cosLat = Math.cos((lat * Math.PI) / 180)
+  return (40075 * cosLat * containerPx) / (512 * Math.pow(2, zoom))
+}
+
+function drawMapRuler() {
+  if (!rulerCanvas.value || !map || !mapEl.value) return
+  const canvas = rulerCanvas.value
+  const container = mapEl.value
+  const dpr = window.devicePixelRatio || 1
+  canvas.width = container.clientWidth * dpr
+  canvas.height = container.clientHeight * dpr
+  canvas.style.width = `${container.clientWidth}px`
+  canvas.style.height = `${container.clientHeight}px`
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.scale(dpr, dpr)
+
+  const w = container.clientWidth
+  const h = container.clientHeight
+  const lat = map.getCenter().lat
+  const zoom = map.getZoom()
+  const widthKm = getWidthKmForZoom(lat, zoom, w)
+  const heightKm = getWidthKmForZoom(lat, zoom, h)
+
+  const tickInterval = niceKmInterval(widthKm)
+  const pxPerKm = w / widthKm
+
+  ctx.clearRect(0, 0, w, h)
+  ctx.font = '10px -apple-system, sans-serif'
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)'
+  ctx.lineWidth = 1
+
+  // Top ruler background
+  ctx.fillStyle = 'rgba(255,255,255,0.8)'
+  ctx.fillRect(0, 0, w, 26)
+  // Left ruler background
+  ctx.fillRect(0, 0, 30, h)
+  ctx.fillStyle = '#333'
+
+  // Top ruler ticks
+  const tickCount = Math.ceil(widthKm / tickInterval)
+  for (let i = 0; i <= tickCount; i++) {
+    const km = i * tickInterval
+    const x = km * pxPerKm
+    if (x > w) break
+    ctx.beginPath()
+    ctx.moveTo(x, 0)
+    ctx.lineTo(x, i % 5 === 0 ? 14 : 8)
+    ctx.stroke()
+    if (i % 5 === 0) {
+      const label = tickInterval < 1 ? `${(km * 1000).toFixed(0)}m` : `${km.toFixed(km < 10 ? 1 : 0)}km`
+      ctx.fillText(label, x + 2, 22)
+    }
+  }
+
+  // Left ruler ticks
+  const vPxPerKm = h / heightKm
+  const vTickCount = Math.ceil(heightKm / tickInterval)
+  for (let i = 0; i <= vTickCount; i++) {
+    const km = i * tickInterval
+    const y = km * vPxPerKm
+    if (y > h) break
+    ctx.beginPath()
+    ctx.moveTo(0, y)
+    ctx.lineTo(i % 5 === 0 ? 14 : 8, y)
+    ctx.stroke()
+    if (i % 5 === 0) {
+      ctx.save()
+      ctx.translate(22, y + 3)
+      ctx.rotate(-Math.PI / 2)
+      const label = tickInterval < 1 ? `${(km * 1000).toFixed(0)}m` : `${km.toFixed(km < 10 ? 1 : 0)}km`
+      ctx.fillText(label, 0, 0)
+      ctx.restore()
+    }
+  }
+}
+
+function niceKmInterval(totalKm: number): number {
+  const targets = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50]
+  for (const t of targets) {
+    if (totalKm / t <= 20 && totalKm / t >= 4) return t
+  }
+  return Math.pow(10, Math.floor(Math.log10(totalKm / 10)))
+}
+
 onMounted(() => {
   if (!mapEl.value) return
   initGps()
@@ -900,9 +994,15 @@ onMounted(() => {
     style: 'https://tiles.openfreemap.org/styles/liberty',
     center: [8.55, 47.38],
     zoom: 10,
+    minZoom: getZoomForWidthKm(47.38, 100, mapEl.value.clientWidth || 400),
+    maxZoom: getZoomForWidthKm(47.38, 0.05, mapEl.value.clientWidth || 400),
+    attributionControl: false,
   })
 
   map.addControl(new maplibregl.NavigationControl(), 'top-right')
+
+  map.on('moveend', drawMapRuler)
+  map.on('zoomend', drawMapRuler)
 
   map.on('load', () => {
     if (!map) return
@@ -1020,7 +1120,7 @@ onMounted(() => {
       source: 'locations',
       layout: {
         'text-field': ['get', 'symbol'],
-        'text-size': 28,
+        'text-size': 22,
         'text-allow-overlap': true,
         'text-ignore-placement': true,
       },
@@ -1035,8 +1135,8 @@ onMounted(() => {
       layout: {
         'text-field': ['get', 'name'],
         'text-size': 11,
-        'text-offset': [0, 1.5],
-        'text-anchor': 'top',
+        'text-offset': [0, -1.5],
+        'text-anchor': 'bottom',
         'text-allow-overlap': false,
       },
       paint: {
@@ -1121,6 +1221,7 @@ onMounted(() => {
     }
 
     syncMapLayers()
+    drawMapRuler()
 
     map.on('click', (e) => handleMapClick(e))
 
@@ -1214,29 +1315,35 @@ watch(showLocations, (visible) => {
 <template>
   <div class="map-wrapper">
     <div ref="mapEl" class="map-container" />
+    <canvas ref="rulerCanvas" class="ruler-overlay"></canvas>
 
     <div class="map-controls">
-      <button
-        :class="['toggle-btn', { active: hideCrossedOff }]"
-        @click="hideCrossedOff = !hideCrossedOff"
-      >
-        {{ hideCrossedOff ? 'Show all' : 'Hide marked off' }}
+      <button class="menu-trigger" @click="menuOpen = !menuOpen">
+        ⋮
       </button>
-      <button
-        :class="['toggle-btn', { active: showLocations }]"
-        @click="showLocations = !showLocations"
-      >
-        📍 Places
-      </button>
-      <button :class="['toggle-btn', { active: radiusMode }]" @click="radiusMode = !radiusMode">
-        📍 Radius
-      </button>
-      <button
-        :class="['toggle-btn', { active: scissorMode }]"
-        @click="scissorMode ? clearScissor() : (scissorMode = true)"
-      >
-        ✂️ Bisect
-      </button>
+      <div v-if="menuOpen" class="menu-items">
+        <button
+          :class="['menu-item', { active: hideCrossedOff }]"
+          @click="hideCrossedOff = !hideCrossedOff"
+        >
+          {{ hideCrossedOff ? 'Show all' : 'Hide marked off' }}
+        </button>
+        <button
+          :class="['menu-item', { active: showLocations }]"
+          @click="showLocations = !showLocations"
+        >
+          📍 Places
+        </button>
+        <button :class="['menu-item', { active: radiusMode }]" @click="radiusMode = !radiusMode; menuOpen = false">
+          📍 Radius
+        </button>
+        <button
+          :class="['menu-item', { active: scissorMode }]"
+          @click="scissorMode ? clearScissor() : (scissorMode = true); menuOpen = false"
+        >
+          ✂️ Bisect
+        </button>
+      </div>
     </div>
 
     <div v-if="radiusMode" class="radius-panel">
@@ -1344,30 +1451,65 @@ watch(showLocations, (visible) => {
   inset: 0;
 }
 
+.ruler-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
 .map-controls {
   position: absolute;
   bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 8px;
+  left: 12px;
   z-index: 10;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: 0;
 }
 
-.toggle-btn {
-  padding: 8px 16px;
+.menu-trigger {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
   background: #fff;
   border: 1px solid #ddd;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 700;
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
   -webkit-tap-highlight-color: transparent;
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.toggle-btn.active {
+.menu-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  background: #fff;
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.menu-item {
+  padding: 8px 14px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.menu-item.active {
   background: #0066cc;
   color: #fff;
   border-color: #0066cc;

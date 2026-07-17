@@ -11,6 +11,15 @@
         <span class="link-label">ZVV Tarifzonen (PDF)</span>
         <span class="link-arrow">→</span>
       </a>
+      <a
+        class="link-item"
+        href="https://github.com/wparad/hide-and-seek/blob/main/data/zvv.pdf?raw=true"
+        target="_blank"
+        rel="noopener"
+      >
+        <span class="link-label">ZVV Map (repo backup)</span>
+        <span class="link-arrow">→</span>
+      </a>
     </section>
 
     <section class="links-section">
@@ -19,7 +28,21 @@
         <span class="link-label">Overpass Turbo (OSM)</span>
         <span class="link-arrow">→</span>
       </a>
+      <a
+        class="link-item"
+        href="https://online.fahrplaninfo.zvv.ch/frame_hst3.php?lang=en&hstNr=11347&hstName="
+        target="_blank"
+        rel="noopener"
+      >
+        <span class="link-label">Line/Station Validator</span>
+        <span class="link-arrow">→</span>
+      </a>
     </section>
+
+    <footer class="attribution">
+      Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors.
+      Tiles by <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>.
+    </footer>
   </div>
 </template>
 
@@ -62,5 +85,19 @@
 .link-arrow {
   color: #999;
   font-size: 16px;
+}
+
+.attribution {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid #e0e0e0;
+  font-size: 11px;
+  color: #999;
+  line-height: 1.6;
+}
+
+.attribution a {
+  color: #666;
+  text-decoration: underline;
 }
 </style>

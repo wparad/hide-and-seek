@@ -13,7 +13,7 @@ export interface Location {
 }
 
 export const locations: Location[] = [
-  { name: 'Zürich Airport', coordinates: [8.59907, 47.4533773], symbol: '✈️' },
+  { name: 'Zürich Airport', coordinates: [8.550869, 47.461705], symbol: '✈️' },
 ]
 
 export const stations: Station[] = [
@@ -124,7 +124,7 @@ export const stations: Station[] = [
   {
     name: 'Rapperswil SG',
     coordinates: [8.8169129, 47.2245321],
-    lines: ['S4', 'S5', 'S6', 'S7', 'S8', 'S14', 'S15', 'S16', 'S17', 'S40'],
+    lines: ['S5', 'S7', 'S15', 'S26', 'S40'],
   },
   { name: 'Regensdorf-Watt', coordinates: [8.4713424, 47.4372129], lines: ['S6', 'S21'] },
   { name: 'Reppischhof', coordinates: [8.3961337, 47.38426], lines: ['S17'] },
@@ -297,7 +297,7 @@ export const lineNames: string[] = (() => {
   })
 })()
 
-/** Build geo line drawings by collecting stations per line and sorting by nearest-neighbor */
+/** Build geo line drawings by collecting stations per line and sorting by shortest open path */
 export function buildGeoLines(): Record<string, [number, number][]> {
   const lineStations = new Map<string, { name: string; coords: [number, number] }[]>()
   for (const s of stations) {
@@ -312,27 +312,48 @@ export function buildGeoLines(): Record<string, [number, number][]> {
   const result: Record<string, [number, number][]> = {}
   for (const [line, stns] of lineStations) {
     if (stns.length < 2) continue
-    // Nearest-neighbor sort starting from first station
-    const sorted: [number, number][] = []
-    const remaining = [...stns]
-    let current = remaining.shift()!
-    sorted.push(current.coords)
+    result[line] = shortestNNPath(stns.map((s) => s.coords))
+  }
+  return result
+}
+
+/**
+ * Find the shortest open path through points using nearest-neighbor from every
+ * starting point and keeping the shortest result. O(n³) but n ≤ ~20 for S-Bahn lines.
+ */
+function shortestNNPath(points: [number, number][]): [number, number][] {
+  let bestPath: [number, number][] = []
+  let bestDist = Infinity
+
+  for (let start = 0; start < points.length; start++) {
+    const remaining = [...points]
+    const path: [number, number][] = []
+    let current = remaining.splice(start, 1)[0]
+    path.push(current)
+    let totalDist = 0
+
     while (remaining.length > 0) {
       let nearestIdx = 0
       let nearestDist = Infinity
       for (let i = 0; i < remaining.length; i++) {
-        const d = squaredDist(current.coords, remaining[i].coords)
+        const d = squaredDist(current, remaining[i])
         if (d < nearestDist) {
           nearestDist = d
           nearestIdx = i
         }
       }
+      totalDist += nearestDist
       current = remaining.splice(nearestIdx, 1)[0]
-      sorted.push(current.coords)
+      path.push(current)
     }
-    result[line] = sorted
+
+    if (totalDist < bestDist) {
+      bestDist = totalDist
+      bestPath = path
+    }
   }
-  return result
+
+  return bestPath
 }
 
 function squaredDist(a: [number, number], b: [number, number]): number {

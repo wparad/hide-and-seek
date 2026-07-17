@@ -1,7 +1,7 @@
 import { reactive, computed } from 'vue'
 import { stations, type Station } from './stations'
 
-export type TabId = 'map' | 'stations' | 'history' | 'actions' | 'links' | 'reachability'
+export type TabId = 'map' | 'stations' | 'history' | 'actions' | 'links' | 'reachability' | 'endgame'
 
 export interface GameAction {
   id: string
@@ -351,6 +351,13 @@ function createStore() {
     state.favorites.splice(0, state.favorites.length)
     Object.assign(state.mapLayers, DEFAULT_MAP_LAYERS)
     state.showStationLabels = true
+    // Clear all app localStorage keys
+    const keysToRemove: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key?.startsWith('hide-and-seek')) keysToRemove.push(key)
+    }
+    for (const key of keysToRemove) localStorage.removeItem(key)
     persist()
   }
 

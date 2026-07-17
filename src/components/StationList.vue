@@ -153,7 +153,7 @@ function saveLines() {
           type="checkbox"
           class="station-checkbox"
           :checked="!isCrossedOff(station.name)"
-          @click.stop="handleStationClick(station.name)"
+          @click.stop.prevent="handleStationClick(station.name)"
         />
         <span class="station-name">{{ station.name }}</span>
         <span class="station-lines">

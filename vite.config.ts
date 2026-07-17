@@ -6,7 +6,8 @@ import { VitePWA } from 'vite-plugin-pwa'
 export default defineConfig({
   define: {
     __BUILD_SHA__: JSON.stringify(execSync('git rev-parse --short HEAD').toString().trim()),
-    __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
+    __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
+    __BUILD_NUMBER__: JSON.stringify(process.env.GITHUB_RUN_NUMBER ?? 'local'),
   },
   plugins: [
     vue(),
@@ -36,7 +37,7 @@ export default defineConfig({
             handler: 'CacheFirst',
             options: {
               cacheName: 'map-tiles',
-              expiration: { maxEntries: 500, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              expiration: { maxEntries: 5000, maxAgeSeconds: 60 * 60 * 24 * 365 },
               cacheableResponse: { statuses: [0, 200] },
             },
           },
