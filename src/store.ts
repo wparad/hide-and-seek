@@ -71,6 +71,7 @@ interface GameState {
   mapLayers: MapLayerVisibility
   showStationLabels: boolean
   flexibleHidingZone: boolean
+  questionCounts: Record<string, number>
 }
 
 const STORAGE_KEY = 'hide-and-seek-zurich'
@@ -129,6 +130,7 @@ function loadState(): GameState {
         mapLayers: { ...DEFAULT_MAP_LAYERS, ...(parsed.mapLayers ?? {}) },
         showStationLabels: parsed.showStationLabels ?? true,
         flexibleHidingZone: parsed.flexibleHidingZone ?? false,
+        questionCounts: parsed.questionCounts ?? {},
       }
     }
   } catch {
@@ -150,6 +152,7 @@ function freshState(fromUrl: string[] | null): GameState {
     mapLayers: { ...DEFAULT_MAP_LAYERS },
     showStationLabels: true,
     flexibleHidingZone: false,
+    questionCounts: {},
   }
 }
 
@@ -168,6 +171,7 @@ function saveState(state: GameState) {
       mapLayers: state.mapLayers,
       showStationLabels: state.showStationLabels,
       flexibleHidingZone: state.flexibleHidingZone,
+      questionCounts: state.questionCounts,
     }),
   )
 }
@@ -361,6 +365,7 @@ function createStore() {
     Object.assign(state.mapLayers, DEFAULT_MAP_LAYERS)
     state.showStationLabels = true
     state.flexibleHidingZone = false
+    state.questionCounts = {}
     // Clear all app localStorage keys
     const keysToRemove: string[] = []
     for (let i = 0; i < localStorage.length; i++) {
@@ -378,6 +383,11 @@ function createStore() {
 
   function toggleMapLayer(layer: keyof MapLayerVisibility) {
     state.mapLayers[layer] = !state.mapLayers[layer]
+    persist()
+  }
+
+  function activateQuestion(id: string) {
+    state.questionCounts[id] = (state.questionCounts[id] ?? 0) + 1
     persist()
   }
 
@@ -413,6 +423,9 @@ function createStore() {
     get flexibleHidingZone() {
       return state.flexibleHidingZone
     },
+    get questionCounts() {
+      return state.questionCounts
+    },
     addAction,
     setStationLines,
     getStationLines,
@@ -430,6 +443,7 @@ function createStore() {
     resetAll,
     setTab,
     toggleMapLayer,
+    activateQuestion,
   }
 }
 

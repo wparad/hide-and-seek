@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import CardsPanel from './CardsPanel.vue'
+import QuestionsPanel from './QuestionsPanel.vue'
 
 const mode = ref<'kb' | 'questions' | 'cards'>('kb')
 const searchQuery = ref('')
@@ -26,9 +27,8 @@ const searchQuery = ref('')
         <span class="placeholder-icon">📖</span>
         <p>Knowledge base coming soon</p>
       </div>
-      <div v-else-if="mode === 'questions'" class="placeholder">
-        <span class="placeholder-icon">❓</span>
-        <p>Questions coming soon</p>
+      <div v-else-if="mode === 'questions'">
+        <QuestionsPanel />
       </div>
       <div v-else>
         <CardsPanel />

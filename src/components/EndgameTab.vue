@@ -49,6 +49,9 @@ const placingMode = ref(false)
 const showClearExclModal = ref(false)
 const mapEl = ref<HTMLDivElement | null>(null)
 const rulerCanvas = ref<HTMLCanvasElement | null>(null)
+const drawCanvas = ref<HTMLCanvasElement | null>(null)
+const drawMode = ref(false)
+let isDrawing = false
 const closestStationName = computed(() => {
   if (!userPosition.value) return null
   return findClosestStation(userPosition.value)
@@ -367,6 +370,80 @@ function niceInterval(totalM: number): number {
   return Math.pow(10, Math.floor(Math.log10(totalM / 10)))
 }
 
+function getDrawCtx(): CanvasRenderingContext2D | null {
+  if (!drawCanvas.value || !mapEl.value) return null
+  const canvas = drawCanvas.value
+  const container = mapEl.value
+  const dpr = window.devicePixelRatio || 1
+  if (canvas.width !== container.clientWidth * dpr) {
+    canvas.width = container.clientWidth * dpr
+    canvas.height = container.clientHeight * dpr
+    canvas.style.width = `${container.clientWidth}px`
+    canvas.style.height = `${container.clientHeight}px`
+  }
+  const ctx = canvas.getContext('2d')
+  if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  return ctx
+}
+
+function onDrawStart(e: MouseEvent | TouchEvent) {
+  if (!drawMode.value) return
+  isDrawing = true
+  const ctx = getDrawCtx()
+  if (!ctx) return
+  const pos = getEventPos(e)
+  ctx.beginPath()
+  ctx.moveTo(pos.x, pos.y)
+  ctx.strokeStyle = '#dc2626'
+  ctx.lineWidth = 3
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+}
+
+function onDrawMove(e: MouseEvent | TouchEvent) {
+  if (!isDrawing || !drawMode.value) return
+  e.preventDefault()
+  const ctx = getDrawCtx()
+  if (!ctx) return
+  const pos = getEventPos(e)
+  ctx.lineTo(pos.x, pos.y)
+  ctx.stroke()
+}
+
+function onDrawEnd() {
+  isDrawing = false
+}
+
+function getEventPos(e: MouseEvent | TouchEvent): { x: number; y: number } {
+  const canvas = drawCanvas.value!
+  const rect = canvas.getBoundingClientRect()
+  if ('touches' in e) {
+    const touch = e.touches[0] ?? (e as TouchEvent).changedTouches[0]
+    return { x: touch.clientX - rect.left, y: touch.clientY - rect.top }
+  }
+  return { x: (e as MouseEvent).clientX - rect.left, y: (e as MouseEvent).clientY - rect.top }
+}
+
+function clearDrawing() {
+  const canvas = drawCanvas.value
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')
+  if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height)
+}
+
+function saveDrawing() {
+  if (!drawCanvas.value) return
+  drawCanvas.value.toBlob((blob) => {
+    if (!blob) return
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `tracing.png`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, 'image/png')
+}
+
 function handleMapClick(e: maplibregl.MapMouseEvent) {
   if (placingMode.value) {
     addExclusion([e.lngLat.lng, e.lngLat.lat])
@@ -573,6 +650,29 @@ watch(userPosition, () => {
   }
 })
 
+watch(drawMode, (active) => {
+  if (!map) return
+  if (active) {
+    map.dragPan.disable()
+    map.scrollZoom.disable()
+    map.doubleClickZoom.disable()
+    map.touchZoomRotate.disable()
+    // Size canvas immediately
+    if (drawCanvas.value && mapEl.value) {
+      const dpr = window.devicePixelRatio || 1
+      drawCanvas.value.width = mapEl.value.clientWidth * dpr
+      drawCanvas.value.height = mapEl.value.clientHeight * dpr
+      drawCanvas.value.style.width = `${mapEl.value.clientWidth}px`
+      drawCanvas.value.style.height = `${mapEl.value.clientHeight}px`
+    }
+  } else {
+    map.dragPan.enable()
+    map.scrollZoom.enable()
+    map.doubleClickZoom.enable()
+    map.touchZoomRotate.enable()
+  }
+})
+
 const radiusLabel = computed(() => {
   const m = radiusKm.value * 1000
   return `${Math.round(m)} m`
@@ -700,6 +800,26 @@ const exclusionRadiusLabel = computed(() => {
     <div class="endgame-map-wrapper">
       <div ref="mapEl" class="endgame-map"></div>
       <canvas ref="rulerCanvas" class="ruler-overlay"></canvas>
+      <canvas
+        ref="drawCanvas"
+        :class="['draw-overlay', { active: drawMode }]"
+        @mousedown="onDrawStart"
+        @mousemove="onDrawMove"
+        @mouseup="onDrawEnd"
+        @mouseleave="onDrawEnd"
+        @touchstart="onDrawStart"
+        @touchmove="onDrawMove"
+        @touchend="onDrawEnd"
+      ></canvas>
+      <div class="draw-toolbar">
+        <button :class="['draw-toggle', { active: drawMode }]" @click="drawMode ? (drawMode = false, clearDrawing()) : (drawMode = true)">
+          ✏️
+        </button>
+        <template v-if="drawMode">
+          <button class="draw-btn" @click="clearDrawing">🧽</button>
+          <button class="draw-btn" @click="saveDrawing">💾</button>
+        </template>
+      </div>
       <div v-if="placingMode" class="placing-hint">Tap map to place exclusion zone</div>
     </div>
 
@@ -930,6 +1050,62 @@ const exclusionRadiusLabel = computed(() => {
   inset: 0;
   pointer-events: none;
   z-index: 5;
+}
+
+.draw-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 8;
+}
+
+.draw-overlay.active {
+  pointer-events: auto;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.draw-toolbar {
+  position: absolute;
+  bottom: 16px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 10;
+}
+
+.draw-toggle {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid #ddd;
+  background: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.draw-toggle.active {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+.draw-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #ddd;
+  background: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .placing-hint {

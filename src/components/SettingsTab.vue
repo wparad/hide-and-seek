@@ -55,6 +55,13 @@ function confirmReset() {
 
 <template>
   <div class="settings-tab">
+    <!-- Reset -->
+    <section class="settings-section">
+      <button class="action-btn danger-btn" @click="showResetConfirm = true">
+        Reset Everything
+      </button>
+    </section>
+
     <!-- Admin section -->
     <section class="settings-section">
       <label class="toggle-row">
@@ -102,11 +109,8 @@ function confirmReset() {
       </label>
     </section>
 
-    <section class="settings-section danger-section">
-      <button class="action-btn danger-btn" @click="showResetConfirm = true">
-        Reset Everything
-      </button>
-      <button class="action-btn secondary-btn" style="margin-top: 12px" @click="clearMapCache">
+    <section class="settings-section">
+      <button class="action-btn secondary-btn" @click="clearMapCache">
         Clear map cache
       </button>
     </section>
