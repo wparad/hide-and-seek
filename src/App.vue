@@ -1,22 +1,22 @@
 <script setup lang="ts">
 import { useStore } from './store'
 import StationList from './components/StationList.vue'
-import HistoryList from './components/HistoryList.vue'
 import MapView from './components/MapView.vue'
 import ReachabilityTab from './components/ReachabilityTab.vue'
 import EndgameTab from './components/EndgameTab.vue'
+import RulesTab from './components/RulesTab.vue'
 import SettingsTab from './components/SettingsTab.vue'
 
 const store = useStore()
 
-type Tab = 'map' | 'stations' | 'history' | 'reachability' | 'endgame' | 'settings'
+type Tab = 'map' | 'stations' | 'reachability' | 'endgame' | 'rules' | 'settings'
 
 const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'map', label: 'Map', icon: '\uD83D\uDDFA\uFE0F' },
   { id: 'stations', label: 'Stations', icon: '\uD83D\uDE89' },
-  { id: 'history', label: 'History', icon: '\uD83D\uDCDC' },
   { id: 'reachability', label: 'Reach', icon: '\uD83D\uDEE4\uFE0F' },
   { id: 'endgame', label: 'Endgame', icon: '\uD83C\uDFAF' },
+  { id: 'rules', label: 'Rules', icon: '\uD83D\uDCD6' },
   { id: 'settings', label: 'Settings', icon: '\u2699\uFE0F' },
 ]
 </script>
@@ -38,9 +38,9 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
     >
       <MapView v-if="store.activeTab === 'map'" />
       <StationList v-else-if="store.activeTab === 'stations'" />
-      <HistoryList v-else-if="store.activeTab === 'history'" />
       <ReachabilityTab v-else-if="store.activeTab === 'reachability'" />
       <EndgameTab v-else-if="store.activeTab === 'endgame'" />
+      <RulesTab v-else-if="store.activeTab === 'rules'" />
       <SettingsTab v-else-if="store.activeTab === 'settings'" />
     </main>
 

@@ -73,6 +73,14 @@ function confirmReset() {
         />
         <span>Show station labels on map</span>
       </label>
+      <label class="toggle-row">
+        <input
+          type="checkbox"
+          :checked="store.flexibleHidingZone"
+          @change="store.toggleFlexibleHidingZone()"
+        />
+        <span>Flexible hiding zone radius (advanced)</span>
+      </label>
     </section>
 
     <section class="settings-section">
@@ -142,6 +150,15 @@ function confirmReset() {
         rel="noopener"
       >
         <span class="link-label">Line/Station Validator</span>
+        <span class="link-arrow">→</span>
+      </a>
+      <a
+        class="link-item"
+        href="https://github.com/wparad/hide-and-seek"
+        target="_blank"
+        rel="noopener"
+      >
+        <span class="link-label">GitHub Repository</span>
         <span class="link-arrow">→</span>
       </a>
     </section>

@@ -11,6 +11,7 @@ const rulerCanvas = ref<HTMLCanvasElement | null>(null)
 const hideCrossedOff = ref(false)
 const showLocations = ref(true)
 const menuOpen = ref(false)
+const showHistory = ref(false)
 let map: maplibregl.Map | null = null
 let popup: maplibregl.Popup | null = null
 let popupStation: string | null = null
@@ -1337,7 +1338,7 @@ watch(showLocations, (visible) => {
         <button
           :class="['menu-item', { active: radiusMode }]"
           @click="
-            radiusMode = !radiusMode
+            radiusMode = !radiusMode,
             menuOpen = false
           "
         >
@@ -1346,11 +1347,20 @@ watch(showLocations, (visible) => {
         <button
           :class="['menu-item', { active: scissorMode }]"
           @click="
-            scissorMode ? clearScissor() : (scissorMode = true)
+            scissorMode ? clearScissor() : (scissorMode = true),
             menuOpen = false
           "
         >
           ✂️ Bisect
+        </button>
+        <button
+          :class="['menu-item', { active: showHistory }]"
+          @click="
+            showHistory = !showHistory,
+            menuOpen = false
+          "
+        >
+          📜 History
         </button>
       </div>
     </div>
@@ -1424,6 +1434,28 @@ watch(showLocations, (visible) => {
             Mark off {{ scissorMarkOffCount }}
           </button>
         </template>
+      </div>
+    </div>
+
+    <div v-if="showHistory" class="history-panel">
+      <div class="history-header">
+        <span class="history-title">📜 History</span>
+        <button class="history-close" @click="showHistory = false">✕</button>
+      </div>
+      <div class="history-list">
+        <div
+          v-for="event in [...store.stationHistory].reverse()"
+          :key="event.id"
+          class="history-event"
+        >
+          <span :class="['history-type', event.type]">
+            {{ event.type === 'cross-off' ? '✗' : '✓' }}
+          </span>
+          <span class="history-name">{{ event.name }}</span>
+          <span v-if="event.reason" class="history-reason">{{ event.reason }}</span>
+          <button class="history-undo" @click="store.removeStationEvent(event.id)">↩</button>
+        </div>
+        <div v-if="store.stationHistory.length === 0" class="history-empty">No history yet</div>
       </div>
     </div>
 
@@ -1598,6 +1630,102 @@ watch(showLocations, (visible) => {
   padding: 10px 14px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   z-index: 10;
+}
+
+.history-panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 280px;
+  max-height: 60%;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.history-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.history-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #999;
+  padding: 0 4px;
+}
+
+.history-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.history-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 13px;
+}
+
+.history-type {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.history-type.cross-off {
+  color: #dc2626;
+}
+
+.history-type.restore {
+  color: #16a34a;
+}
+
+.history-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+}
+
+.history-reason {
+  font-size: 11px;
+  color: #888;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-undo {
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  color: #0066cc;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+
+.history-empty {
+  padding: 24px;
+  text-align: center;
+  color: #999;
+  font-size: 13px;
 }
 
 .scissor-label {

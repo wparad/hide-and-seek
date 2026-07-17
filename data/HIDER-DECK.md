@@ -50,6 +50,14 @@ Play this card as a copy of any other card in your hand. This may be used to dup
 
 ---
 
+## Traps
+
+### Time Trap
+
+Place this card on any transit station within the play area. When the seekers arrive at or pass through that station, they must stop there and wait 30 minutes before continuing. The trap is consumed once triggered. The hider is not required to reveal the trap until it is triggered.
+
+---
+
 ## Curses
 
 ### Curse of the Bridge Troll
@@ -57,14 +65,6 @@ Play this card as a copy of any other card in your hand. This may be used to dup
 The seekers must ask their next question from under a bridge.
 
 **Casting cost:** Seekers must be at least 10km from you.
-
----
-
-### Curse of the Drained Brain
-
-Choose thee questios in different categories. The seekers cannot ask those questions of the rest of your run.
-
-**Casting cost:** Discard your hand
 
 ---
 
@@ -86,7 +86,7 @@ Choose three questions in different categories. The seekers cannot ask those que
 
 ### Curse of the Endless Tumble
 
-Seekers must roll a die at least 100 feet and have it land on a 5 or a 6 before they can ask another question. The die must roll the full distance, unaided, using only the momentum from the initial throw and gravity to travel the 100 feet. If the seekers accidentally hit someone with a die, you are awarded a 20 minute bonus.
+Seekers must roll a die at least 30 meters and have it land on a 5 or a 6 before they can ask another question. The die must roll the full distance, unaided, using only the momentum from the initial throw and gravity to travel the 30 meters. If the seekers accidentally hit someone with a die, you are awarded a 20 minute bonus.
 
 **Casting cost:** Roll a die. If it's a 5 or a 6, this card has no effect.
 
@@ -110,7 +110,7 @@ Before asking another question or boarding another form of transportation, seeke
 
 ### Curse of the Impressionable Consumer
 
-Seekers must enter and gain admission (if applicable) to a location or a buy a product that they saw an advertisement for before asking another question. This advertisement must be found out in the world, not on a seeker's device, and must be at least 100 feet from the product or location itself.
+Seekers must enter and gain admission (if applicable) to a location or buy a product that they saw an advertisement for before asking another question. This advertisement must be found out in the world, not on a seeker's device, and must be at least 30 meters from the product or location itself.
 
 **Casting cost:** The seekers' next question is free.
 
@@ -118,9 +118,9 @@ Seekers must enter and gain admission (if applicable) to a location or a buy a p
 
 ### Curse of the Jammed Door
 
-For the next 1 hour, whenever the seekers want to pass through a doorway into a building, business, train, or other vehicle, they must first roll 2 dice. If they do not roll a 7 or higher, they cannot enter that space (including through other doorways.) Any given doorway can be re-attempted after 10 minutes.
+For the next 1 hour, whenever the seekers want to pass through a doorway into a building, business, train, or other vehicle, they must first roll 2 dice. If they do not roll a 7 or higher, they cannot enter that space (including through other doorways). Any given doorway can be re-attempted after 10 minutes.
 
-**Casting cost:** Discard two cards.
+**Casting cost:** Discard 2 cards.
 
 ---
 
@@ -176,7 +176,7 @@ For the next 40 minutes, the seekers can only turn right at any street intersect
 
 For the rest of your run, one random category of questions will be disabled at all times. After this curse is played, seekers must roll a die to determine the category of questions to be disabled. This category remains disabled until the next question is asked, at which point a die is rolled again to choose a new category. The same category can be disabled multiple times in a row.
 
-**Casting cost:** Discard a time bonus.
+**Casting cost:** Discard a time bonus card.
 
 ---
 
@@ -198,9 +198,17 @@ Send the seekers an unzoomed Google Street View image from a street within 150 m
 
 ### Curse of the U-Turn
 
-The seekers must disembark their current mode of transportation at the next station (as long as that station is serviced by another form of transit in the next 30 minutes.)
+The seekers must disembark their current mode of transportation at the next station (as long as that station is serviced by another form of transit in the next 30 minutes).
 
 **Casting cost:** Seekers must be heading the wrong way. (Their next station is further from you than they are.)
+
+---
+
+### Curse of the Express Route
+
+The seekers must stay on their current mode of transportation for another 15 minutes before getting off at the next stop, or until the last stop still within the play area — whichever comes first.
+
+**Casting cost:** Seekers must be on transit heading away from you.
 
 ---
 
@@ -222,23 +230,30 @@ Take a photo of a wild fish, bird, mammal, reptile, amphibian, or bug. The seeke
 
 ### Curse of the American Units
 
-Your hiding zone is now 0.5 Miles (800 meters) instead of 0.5 Kilometers.
+Your hiding zone is now 0.5 miles (800 meters) instead of 0.5 kilometers.
 
-**Casting cost:** Discard atleast 20 minutes worth of time bonuses.
+**Casting cost:** Discard at least 20 minutes worth of time bonuses.
 
 ---
 
 ### Curse of the Hide-and-Seek-Ception
 
-All seekers but one must closer their eyes. Without discussion, the remaining seeker must go somewhere at least 150 meter away and not within direct eyeshot in any direction.
-The other seekers must find them, without asking them for any information, before asking another question.
+All seekers but one must close their eyes. Without discussion, the remaining seeker must go somewhere at least 150 meters away and not within direct eyeshot in any direction. The other seekers must find them, without asking them for any information, before asking another question.
 
 **Casting cost:** The seekers must be off-transit, at least 150 meters from a transit station.
 
 ---
 
-### Curse of the motion sickness
+### Curse of the Motion Sickness
 
-The seekers must get off their current form of transport at the next stop and sit down in any place, which is alteast 50 meters away from any form of motorised transport infrastructure, for 5 minutes to recover.
+The seekers must get off their current form of transport at the next stop and sit down in any place, which is at least 50 meters away from any form of motorised transport infrastructure, for 5 minutes to recover.
 
-**Casting cost:** Discard atleast 5 minutes in time bonuses in solidarity.
+**Casting cost:** Discard at least 5 minutes in time bonuses in solidarity.
+
+---
+
+### Curse of the ADHD Moment
+
+The hider picks a category of questions. That category may not be asked until at least 2 questions from other categories have been asked first.
+
+**Casting cost:** Discard a curse.

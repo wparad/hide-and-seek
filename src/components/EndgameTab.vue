@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { stations } from '../stations'
+import { useStore } from '../store'
 
 const STORAGE_KEY = 'hide-and-seek-endgame'
 
@@ -50,6 +51,7 @@ const rulerCanvas = ref<HTMLCanvasElement | null>(null)
 const closestStationName = ref<string | null>(null)
 let map: maplibregl.Map | null = null
 let constraining = false
+const store = useStore()
 
 function haversineMeters(a: [number, number], b: [number, number]): number {
   const R = 6371000
@@ -589,14 +591,30 @@ const exclusionRadiusLabel = computed(() => {
 
       <label class="endgame-field">
         <span class="endgame-label">Hiding Zone Radius: {{ radiusLabel }}</span>
-        <input
-          v-model.number="radiusKm"
-          type="range"
-          min="0.25"
-          max="2"
-          step="0.01"
-          class="endgame-slider"
-        />
+        <div v-if="store.flexibleHidingZone" class="slider-row">
+          <input
+            v-model.number="radiusKm"
+            type="range"
+            min="0.25"
+            max="2"
+            step="0.01"
+            class="endgame-slider"
+          />
+        </div>
+        <div v-else class="toggle-radius">
+          <button
+            :class="['radius-option', { active: radiusKm === 0.5 }]"
+            @click="radiusKm = 0.5"
+          >
+            500 m
+          </button>
+          <button
+            :class="['radius-option', { active: radiusKm === 0.8 }]"
+            @click="radiusKm = 0.8"
+          >
+            800 m
+          </button>
+        </div>
       </label>
 
       <div class="exclusion-controls">
@@ -761,6 +779,29 @@ const exclusionRadiusLabel = computed(() => {
 .endgame-slider {
   width: 100%;
   cursor: pointer;
+}
+
+.toggle-radius {
+  display: flex;
+  gap: 8px;
+}
+
+.radius-option {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+}
+
+.radius-option.active {
+  background: #22c55e;
+  color: #fff;
+  border-color: #22c55e;
 }
 
 .excl-slider {

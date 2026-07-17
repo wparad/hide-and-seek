@@ -1,7 +1,7 @@
 import { reactive, computed } from 'vue'
 import { stations, type Station } from './stations'
 
-export type TabId = 'map' | 'stations' | 'history' | 'reachability' | 'endgame' | 'settings'
+export type TabId = 'map' | 'stations' | 'reachability' | 'endgame' | 'rules' | 'settings'
 
 export interface GameAction {
   id: string
@@ -70,6 +70,7 @@ interface GameState {
   stationHistory: StationEvent[]
   mapLayers: MapLayerVisibility
   showStationLabels: boolean
+  flexibleHidingZone: boolean
 }
 
 const STORAGE_KEY = 'hide-and-seek-zurich'
@@ -127,6 +128,7 @@ function loadState(): GameState {
         stationHistory: parsed.stationHistory ?? [],
         mapLayers: { ...DEFAULT_MAP_LAYERS, ...(parsed.mapLayers ?? {}) },
         showStationLabels: parsed.showStationLabels ?? true,
+        flexibleHidingZone: parsed.flexibleHidingZone ?? false,
       }
     }
   } catch {
@@ -147,6 +149,7 @@ function freshState(fromUrl: string[] | null): GameState {
     stationHistory: [],
     mapLayers: { ...DEFAULT_MAP_LAYERS },
     showStationLabels: true,
+    flexibleHidingZone: false,
   }
 }
 
@@ -164,6 +167,7 @@ function saveState(state: GameState) {
       stationHistory: state.stationHistory,
       mapLayers: state.mapLayers,
       showStationLabels: state.showStationLabels,
+      flexibleHidingZone: state.flexibleHidingZone,
     }),
   )
 }
@@ -342,6 +346,11 @@ function createStore() {
     persist()
   }
 
+  function toggleFlexibleHidingZone() {
+    state.flexibleHidingZone = !state.flexibleHidingZone
+    persist()
+  }
+
   function resetAll() {
     state.actions.splice(0, state.actions.length)
     state.crossedOff = {}
@@ -351,6 +360,7 @@ function createStore() {
     state.favorites.splice(0, state.favorites.length)
     Object.assign(state.mapLayers, DEFAULT_MAP_LAYERS)
     state.showStationLabels = true
+    state.flexibleHidingZone = false
     // Clear all app localStorage keys
     const keysToRemove: string[] = []
     for (let i = 0; i < localStorage.length; i++) {
@@ -400,6 +410,9 @@ function createStore() {
     get showStationLabels() {
       return state.showStationLabels
     },
+    get flexibleHidingZone() {
+      return state.flexibleHidingZone
+    },
     addAction,
     setStationLines,
     getStationLines,
@@ -407,6 +420,7 @@ function createStore() {
     toggleFavorite,
     toggleHideNoLineData,
     toggleShowStationLabels,
+    toggleFlexibleHidingZone,
     toggleStation,
     crossOffAll,
     restoreAll,
