@@ -96,10 +96,9 @@ function updateGpsMarker() {
   if (!map || !userPosition.value) return
   if (!gpsMarker) {
     const el = document.createElement('div')
-    el.style.cssText = 'width:16px;height:16px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 0 6px rgba(59,130,246,0.6);pointer-events:none;'
-    gpsMarker = new maplibregl.Marker({ element: el })
-      .setLngLat(userPosition.value)
-      .addTo(map)
+    el.style.cssText =
+      'width:16px;height:16px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 0 6px rgba(59,130,246,0.6);pointer-events:none;'
+    gpsMarker = new maplibregl.Marker({ element: el }).setLngLat(userPosition.value).addTo(map)
   } else {
     gpsMarker.setLngLat(userPosition.value)
   }
@@ -644,7 +643,12 @@ watch(radiusKm, () => {
 watch(userPosition, () => {
   updateGpsMarker()
   // Auto-select closest station on first GPS fix if no explicit selection
-  if (userPosition.value && selectedStation.value === stations[0].name && saved.station === stations[0].name && !pendingUrlStation) {
+  if (
+    userPosition.value &&
+    selectedStation.value === stations[0].name &&
+    saved.station === stations[0].name &&
+    !pendingUrlStation
+  ) {
     const closest = findClosestStation(userPosition.value)
     selectStation(closest)
   }
@@ -704,9 +708,7 @@ const exclusionRadiusLabel = computed(() => {
             <button v-if="closestStationName" class="use-current-btn" @click="useClosestStation">
               📍 {{ closestStationName }}
             </button>
-            <button v-else class="use-current-btn" disabled>
-              ⏳ Locating…
-            </button>
+            <button v-else class="use-current-btn" disabled>⏳ Locating…</button>
           </div>
           <ul v-if="showDropdown" class="station-dropdown">
             <li
@@ -812,11 +814,28 @@ const exclusionRadiusLabel = computed(() => {
         @touchend="onDrawEnd"
       ></canvas>
       <div class="draw-toolbar">
-        <button :class="['draw-toggle', { active: drawMode }]" @click="drawMode ? (drawMode = false, clearDrawing()) : (drawMode = true)">
+        <button
+          :class="['draw-toggle', { active: drawMode }]"
+          @click="drawMode ? ((drawMode = false), clearDrawing()) : (drawMode = true)"
+        >
           ✏️
         </button>
         <template v-if="drawMode">
-          <button class="draw-btn" @click="clearDrawing"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h10c4 0 6 2 6 5s-2 5-6 5H9" /><polyline points="7 6 3 10 7 14" /></svg></button>
+          <button class="draw-btn" @click="clearDrawing">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M3 10h10c4 0 6 2 6 5s-2 5-6 5H9" />
+              <polyline points="7 6 3 10 7 14" />
+            </svg>
+          </button>
           <button class="draw-btn" @click="saveDrawing">💾</button>
         </template>
       </div>

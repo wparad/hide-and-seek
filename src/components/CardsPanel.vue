@@ -437,11 +437,7 @@ function categoryLabel(cat: CardDef['category']): string {
     </div>
 
     <!-- Draw button -->
-    <button
-      class="draw-btn"
-      :disabled="deckCount === 0 || overLimit"
-      @click="openDrawModal"
-    >
+    <button class="draw-btn" :disabled="deckCount === 0 || overLimit" @click="openDrawModal">
       Draw Cards
     </button>
 

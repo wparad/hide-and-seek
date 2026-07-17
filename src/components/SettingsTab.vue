@@ -110,9 +110,7 @@ function confirmReset() {
     </section>
 
     <section class="settings-section">
-      <button class="action-btn secondary-btn" @click="clearMapCache">
-        Clear map cache
-      </button>
+      <button class="action-btn secondary-btn" @click="clearMapCache">Clear map cache</button>
     </section>
 
     <!-- Divider -->
