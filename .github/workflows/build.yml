@@ -26,13 +26,16 @@ jobs:
 
       - run: npm ci
 
-      - name: Check (types + lint + format)
+      - name: Check (types + lint)
         id: check
-        run: npm run check
+        continue-on-error: true
+        run: npm run check:ci 2>&1 | tee /tmp/check-output.txt
 
       - name: Build
         id: build
-        run: npm run build
+        if: steps.check.outcome == 'success'
+        continue-on-error: true
+        run: npm run build 2>&1 | tee /tmp/build-output.txt
 
       - name: Build summary
         if: always()
@@ -42,13 +45,31 @@ jobs:
           echo "| Step | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Install | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| Check (vue-tsc + eslint + prettier) | ${{ steps.check.outcome == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Build (vite) | ${{ steps.build.outcome == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Check (vue-tsc + eslint) | ${{ steps.check.outcome == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build (vite) | ${{ steps.build.outcome == 'success' && '✅' || (steps.build.outcome == 'skipped' && '⏭️' || '❌') }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.check.outcome }}" != "success" ] && [ -f /tmp/check-output.txt ]; then
+            echo "### Check Errors" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -50 /tmp/check-output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ steps.build.outcome }}" == "failure" ] && [ -f /tmp/build-output.txt ]; then
+            echo "### Build Errors" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -50 /tmp/build-output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "**Commit:** \`${GITHUB_SHA::8}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Build:** #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
           echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if checks or build failed
+        if: steps.check.outcome != 'success' || steps.build.outcome == 'failure'
+        run: exit 1
 
       - uses: actions/upload-pages-artifact@v3
         with:

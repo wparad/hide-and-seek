@@ -8,18 +8,10 @@ const searchQuery = ref('')
 <template>
   <div class="rules-tab">
     <div class="rules-header">
-      <input
-        v-model="searchQuery"
-        type="text"
-        class="rules-search"
-        placeholder="Search rules…"
-      />
+      <input v-model="searchQuery" type="text" class="rules-search" placeholder="Search rules…" />
       <div class="mode-toggle">
         <button :class="['mode-btn', { active: mode === 'kb' }]" @click="mode = 'kb'">KB</button>
-        <button
-          :class="['mode-btn', { active: mode === 'questions' }]"
-          @click="mode = 'questions'"
-        >
+        <button :class="['mode-btn', { active: mode === 'questions' }]" @click="mode = 'questions'">
           Questions
         </button>
       </div>

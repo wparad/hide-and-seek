@@ -1,0 +1,3 @@
+#!/bin/sh
+# Prettier check on staged files — blocks commit if formatting is wrong
+npx prettier --check src/

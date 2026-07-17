@@ -602,16 +602,10 @@ const exclusionRadiusLabel = computed(() => {
           />
         </div>
         <div v-else class="toggle-radius">
-          <button
-            :class="['radius-option', { active: radiusKm === 0.5 }]"
-            @click="radiusKm = 0.5"
-          >
+          <button :class="['radius-option', { active: radiusKm === 0.5 }]" @click="radiusKm = 0.5">
             500 m
           </button>
-          <button
-            :class="['radius-option', { active: radiusKm === 0.8 }]"
-            @click="radiusKm = 0.8"
-          >
+          <button :class="['radius-option', { active: radiusKm === 0.8 }]" @click="radiusKm = 0.8">
             800 m
           </button>
         </div>

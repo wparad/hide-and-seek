@@ -1337,28 +1337,19 @@ watch(showLocations, (visible) => {
         </button>
         <button
           :class="['menu-item', { active: radiusMode }]"
-          @click="
-            radiusMode = !radiusMode,
-            menuOpen = false
-          "
+          @click="((radiusMode = !radiusMode), (menuOpen = false))"
         >
           📍 Radius
         </button>
         <button
           :class="['menu-item', { active: scissorMode }]"
-          @click="
-            scissorMode ? clearScissor() : (scissorMode = true),
-            menuOpen = false
-          "
+          @click="(scissorMode ? clearScissor() : (scissorMode = true), (menuOpen = false))"
         >
           ✂️ Bisect
         </button>
         <button
           :class="['menu-item', { active: showHistory }]"
-          @click="
-            showHistory = !showHistory,
-            menuOpen = false
-          "
+          @click="((showHistory = !showHistory), (menuOpen = false))"
         >
           📜 History
         </button>
