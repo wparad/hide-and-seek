@@ -119,7 +119,7 @@ function confirmReset() {
       <h2 class="section-title">ZVV</h2>
       <a
         class="link-item"
-        href="https://www.zvv.ch/content/dam/zvv/publikationen/zonen/zvv-tarifzonen.pdf"
+        href="https://www.zvv.ch/content/dam/zvv/publikationen/liniennetzplaene/all.pdf"
         target="_blank"
         rel="noopener"
       >

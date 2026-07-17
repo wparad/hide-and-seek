@@ -26,6 +26,7 @@ export const stations: Station[] = [
   { name: 'Bauma', coordinates: [8.8783122, 47.3688843], lines: ['S26'] },
   { name: 'Bergfrieden', coordinates: [8.3988608, 47.3974091], lines: ['S17'] },
   { name: 'Birmensdorf ZH', coordinates: [8.4375314, 47.3575203], lines: ['S5', 'S14'] },
+  { name: 'Blumenau', coordinates: [8.842395, 47.223666], lines: ['S6', 'S17'] },
   { name: 'Bonstetten-Wettswil', coordinates: [8.4679666, 47.3262104], lines: ['S5', 'S14'] },
   { name: 'Bubikon', coordinates: [8.8227427, 47.2709342], lines: ['S5', 'S14', 'S15'] },
   { name: 'Buchs-Dällikon', coordinates: [8.4369187, 47.453237], lines: ['S6'] },
