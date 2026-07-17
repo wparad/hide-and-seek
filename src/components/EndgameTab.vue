@@ -24,7 +24,9 @@ function loadState(): EndgameState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) return JSON.parse(raw)
-  } catch { /* corrupted */ }
+  } catch {
+    /* corrupted */
+  }
   return { station: stations[0].name, radiusKm: 0.5, zoom: 0, center: null, exclusions: [] }
 }
 
@@ -94,7 +96,10 @@ function initGps() {
 initGps()
 
 function normalize(str: string): string {
-  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  return str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
 }
 
 const filteredStations = computed(() => {
@@ -115,16 +120,22 @@ function onInputFocus() {
 }
 
 function onInputBlur() {
-  setTimeout(() => { showDropdown.value = false }, 150)
+  setTimeout(() => {
+    showDropdown.value = false
+  }, 150)
 }
 
 function onSearchInput() {
   showDropdown.value = true
 }
 
-const station = computed(() => stations.find((s) => s.name === selectedStation.value) ?? stations[0])
+const station = computed(
+  () => stations.find((s) => s.name === selectedStation.value) ?? stations[0],
+)
 
-const activeExclusion = computed(() => exclusions.value.find((e) => e.id === selectedExclusion.value))
+const activeExclusion = computed(() =>
+  exclusions.value.find((e) => e.id === selectedExclusion.value),
+)
 
 function getZoomForWidthKm(lat: number, widthKm: number, containerWidth: number): number {
   const cosLat = Math.cos((lat * Math.PI) / 180)
@@ -171,7 +182,10 @@ function buildExclusionsGeoJSON(): GeoJSON.FeatureCollection {
     type: 'FeatureCollection',
     features: exclusions.value.map((ex) => ({
       type: 'Feature' as const,
-      geometry: { type: 'Polygon' as const, coordinates: [buildCircleCoords(ex.center, ex.radiusM)] },
+      geometry: {
+        type: 'Polygon' as const,
+        coordinates: [buildCircleCoords(ex.center, ex.radiusM)],
+      },
       properties: { id: ex.id, selected: ex.id === selectedExclusion.value ? 'yes' : 'no' },
     })),
   }
@@ -234,7 +248,7 @@ function updateExclusionRadius(id: string, radiusM: number) {
 }
 
 function persist() {
-  const center = map ? [map.getCenter().lng, map.getCenter().lat] as [number, number] : null
+  const center = map ? ([map.getCenter().lng, map.getCenter().lat] as [number, number]) : null
   const zoom = map ? map.getZoom() : 0
   saveState({
     station: selectedStation.value,
@@ -387,7 +401,8 @@ onMounted(() => {
   const maxZoom = getZoomForWidthKm(coords[1], 0.05, containerWidth)
 
   const initialCenter = savedCenter.value ?? coords
-  const initialZoom = savedZoom.value > 0 ? Math.max(minZoom, Math.min(maxZoom, savedZoom.value)) : minZoom
+  const initialZoom =
+    savedZoom.value > 0 ? Math.max(minZoom, Math.min(maxZoom, savedZoom.value)) : minZoom
 
   map = new maplibregl.Map({
     container: mapEl.value,
@@ -439,7 +454,10 @@ onMounted(() => {
       id: 'exclusions-fill-layer',
       type: 'fill',
       source: 'exclusions-fill',
-      paint: { 'fill-color': '#dc2626', 'fill-opacity': ['case', ['==', ['get', 'selected'], 'yes'], 0.63, 0.38] },
+      paint: {
+        'fill-color': '#dc2626',
+        'fill-opacity': ['case', ['==', ['get', 'selected'], 'yes'], 0.63, 0.38],
+      },
     })
     map.addLayer({
       id: 'exclusions-outline-layer',
@@ -470,14 +488,21 @@ onMounted(() => {
       type: 'geojson',
       data: {
         type: 'FeatureCollection',
-        features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: coords }, properties: {} }],
+        features: [
+          { type: 'Feature', geometry: { type: 'Point', coordinates: coords }, properties: {} },
+        ],
       },
     })
     map.addLayer({
       id: 'station-marker-circle',
       type: 'circle',
       source: 'station-marker',
-      paint: { 'circle-radius': 8, 'circle-color': '#7c3aed', 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' },
+      paint: {
+        'circle-radius': 8,
+        'circle-color': '#7c3aed',
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#fff',
+      },
     })
 
     drawRuler()
@@ -497,7 +522,13 @@ watch(selectedStation, () => {
   if (source) {
     source.setData({
       type: 'FeatureCollection',
-      features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: station.value.coordinates }, properties: {} }],
+      features: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: station.value.coordinates },
+          properties: {},
+        },
+      ],
     })
   }
 })
@@ -536,11 +567,7 @@ const exclusionRadiusLabel = computed(() => {
               @blur="onInputBlur"
               @input="onSearchInput"
             />
-            <button
-              v-if="closestStationName"
-              class="use-current-btn"
-              @click="useClosestStation"
-            >
+            <button v-if="closestStationName" class="use-current-btn" @click="useClosestStation">
               📍 {{ closestStationName }}
             </button>
           </div>
@@ -599,7 +626,12 @@ const exclusionRadiusLabel = computed(() => {
               max="2000"
               step="10"
               class="endgame-slider excl-slider"
-              @input="updateExclusionRadius(activeExclusion!.id, Number(($event.target as HTMLInputElement).value))"
+              @input="
+                updateExclusionRadius(
+                  activeExclusion!.id,
+                  Number(($event.target as HTMLInputElement).value),
+                )
+              "
             />
           </label>
           <button class="excl-remove-btn" @click="removeExclusion(activeExclusion!.id)">

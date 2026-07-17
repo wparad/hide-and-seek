@@ -950,7 +950,8 @@ function drawMapRuler() {
     ctx.lineTo(x, i % 5 === 0 ? 14 : 8)
     ctx.stroke()
     if (i % 5 === 0) {
-      const label = tickInterval < 1 ? `${(km * 1000).toFixed(0)}m` : `${km.toFixed(km < 10 ? 1 : 0)}km`
+      const label =
+        tickInterval < 1 ? `${(km * 1000).toFixed(0)}m` : `${km.toFixed(km < 10 ? 1 : 0)}km`
       ctx.fillText(label, x + 2, 22)
     }
   }
@@ -970,7 +971,8 @@ function drawMapRuler() {
       ctx.save()
       ctx.translate(22, y + 3)
       ctx.rotate(-Math.PI / 2)
-      const label = tickInterval < 1 ? `${(km * 1000).toFixed(0)}m` : `${km.toFixed(km < 10 ? 1 : 0)}km`
+      const label =
+        tickInterval < 1 ? `${(km * 1000).toFixed(0)}m` : `${km.toFixed(km < 10 ? 1 : 0)}km`
       ctx.fillText(label, 0, 0)
       ctx.restore()
     }
@@ -1318,9 +1320,7 @@ watch(showLocations, (visible) => {
     <canvas ref="rulerCanvas" class="ruler-overlay"></canvas>
 
     <div class="map-controls">
-      <button class="menu-trigger" @click="menuOpen = !menuOpen">
-        ⋮
-      </button>
+      <button class="menu-trigger" @click="menuOpen = !menuOpen">⋮</button>
       <div v-if="menuOpen" class="menu-items">
         <button
           :class="['menu-item', { active: hideCrossedOff }]"
@@ -1334,12 +1334,21 @@ watch(showLocations, (visible) => {
         >
           📍 Places
         </button>
-        <button :class="['menu-item', { active: radiusMode }]" @click="radiusMode = !radiusMode; menuOpen = false">
+        <button
+          :class="['menu-item', { active: radiusMode }]"
+          @click="
+            radiusMode = !radiusMode
+            menuOpen = false
+          "
+        >
           📍 Radius
         </button>
         <button
           :class="['menu-item', { active: scissorMode }]"
-          @click="scissorMode ? clearScissor() : (scissorMode = true); menuOpen = false"
+          @click="
+            scissorMode ? clearScissor() : (scissorMode = true)
+            menuOpen = false
+          "
         >
           ✂️ Bisect
         </button>

@@ -147,8 +147,12 @@ function confirmReset() {
     </section>
 
     <footer class="attribution">
-      Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors.
-      Tiles by <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>.
+      Map data ©
+      <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener"
+        >OpenStreetMap</a
+      >
+      contributors. Tiles by
+      <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>.
     </footer>
 
     <section class="build-info">

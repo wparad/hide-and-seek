@@ -30,7 +30,12 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
       >
     </header>
 
-    <main :class="['content', { 'map-active': store.activeTab === 'map' || store.activeTab === 'endgame' }]">
+    <main
+      :class="[
+        'content',
+        { 'map-active': store.activeTab === 'map' || store.activeTab === 'endgame' },
+      ]"
+    >
       <MapView v-if="store.activeTab === 'map'" />
       <StationList v-else-if="store.activeTab === 'stations'" />
       <HistoryList v-else-if="store.activeTab === 'history'" />
