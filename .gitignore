@@ -2,4 +2,4 @@ node_modules/
 dist/
 .gtfs-tmp/
 data/*
-!data/README.md
+!data/*.md

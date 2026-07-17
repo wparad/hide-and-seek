@@ -2,15 +2,14 @@
 import { useStore } from './store'
 import StationList from './components/StationList.vue'
 import HistoryList from './components/HistoryList.vue'
-import ActionsTab from './components/ActionsTab.vue'
 import MapView from './components/MapView.vue'
-import LinksTab from './components/LinksTab.vue'
 import ReachabilityTab from './components/ReachabilityTab.vue'
 import EndgameTab from './components/EndgameTab.vue'
+import SettingsTab from './components/SettingsTab.vue'
 
 const store = useStore()
 
-type Tab = 'map' | 'stations' | 'history' | 'actions' | 'links' | 'reachability' | 'endgame'
+type Tab = 'map' | 'stations' | 'history' | 'reachability' | 'endgame' | 'settings'
 
 const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'map', label: 'Map', icon: '\uD83D\uDDFA\uFE0F' },
@@ -18,8 +17,7 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'history', label: 'History', icon: '\uD83D\uDCDC' },
   { id: 'reachability', label: 'Reach', icon: '\uD83D\uDEE4\uFE0F' },
   { id: 'endgame', label: 'Endgame', icon: '\uD83C\uDFAF' },
-  { id: 'actions', label: 'Admin', icon: '\u2699\uFE0F' },
-  { id: 'links', label: 'Links', icon: '\uD83D\uDD17' },
+  { id: 'settings', label: 'Settings', icon: '\u2699\uFE0F' },
 ]
 </script>
 
@@ -36,10 +34,9 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
       <MapView v-if="store.activeTab === 'map'" />
       <StationList v-else-if="store.activeTab === 'stations'" />
       <HistoryList v-else-if="store.activeTab === 'history'" />
-      <ActionsTab v-else-if="store.activeTab === 'actions'" />
-      <LinksTab v-else-if="store.activeTab === 'links'" />
       <ReachabilityTab v-else-if="store.activeTab === 'reachability'" />
       <EndgameTab v-else-if="store.activeTab === 'endgame'" />
+      <SettingsTab v-else-if="store.activeTab === 'settings'" />
     </main>
 
     <nav class="tab-bar">

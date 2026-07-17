@@ -1,7 +1,7 @@
 import { reactive, computed } from 'vue'
 import { stations, type Station } from './stations'
 
-export type TabId = 'map' | 'stations' | 'history' | 'actions' | 'links' | 'reachability' | 'endgame'
+export type TabId = 'map' | 'stations' | 'history' | 'reachability' | 'endgame' | 'settings'
 
 export interface GameAction {
   id: string
