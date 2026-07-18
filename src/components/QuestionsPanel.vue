@@ -164,13 +164,6 @@ const categories: QuestionCategory[] = [
         availability: 'All Games',
       },
       {
-        id: 'photos-15',
-        label: 'Park',
-        requirements:
-          "No zoom, phone perpendicular to ground, must stand 5' away from any obstruction",
-        availability: 'Medium & Up',
-      },
-      {
         id: 'photos-8',
         label: 'Street name sign',
         requirements: 'Must show at least 3 visible letters of the street name',
@@ -214,6 +207,12 @@ const categories: QuestionCategory[] = [
         label: 'Two Buildings',
         requirements: "Must include 5'x5' section with three distinct elements",
         availability: 'Medium & Up',
+      },
+      {
+        id: 'photos-16',
+        label: "What's in front of you",
+        requirements: 'No zoom, phone perpendicular to your line of sight',
+        availability: 'All Games',
       },
       {
         id: 'photos-4',

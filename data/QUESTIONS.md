@@ -103,7 +103,7 @@
 | 12 | Trace Nearest Street / Path | Street / Path must be visible on mapping app. Trace intersection to intersection | Medium & Up |
 | 13 | Two Buildings | Must include 5'x5' section with three distinct elements | Medium & Up |
 | 14 | Train Platform | Must include 5'x5' section with three distinct elements | Medium & Up |
-| 15 | Park | No zoom, phone perpendicular to ground, must stand 5' away from any obstruction | Medium & Up |
+| 16 | What's in front of you | No zoom, phone perpendicular to your line of sight | All Games |
 
 ---
 
