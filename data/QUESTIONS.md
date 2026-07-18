@@ -95,7 +95,7 @@
 | 4 | Widest Street | Must include both sides of the street | All Games |
 | 5 | Tallest structure in your sightline | Tallest from your current perspective / sightline. Must include top and both sides. The top must be in the top 1/3rd of frame | All Games |
 | 6 | Any building visible from station | Must stand directly outside transit station entrance. If multiple entrances you may choose. Must include roof, both sides, with the top of the building in the top 1/3rd of frame | All Games |
-| 7 | A Body of Water | Must be visible natural water (lake, river, stream) | All Games |
+| 7 | A Body of Water | A named body of water from your hiding zone. Must not be the endgame. If none exists within 2 km, respond "null". | All Games |
 | 8 | Street name sign | Must show at least 3 visible letters of the street name | All Games |
 | 9 | Largest body of water you can see | No zoom, photo must show the largest visible body of water from where you stand | All Games |
 | 10 | A unique object | Must be something obviously specific to your location — not something you'd see most other places | All Games |

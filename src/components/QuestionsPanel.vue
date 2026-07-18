@@ -132,7 +132,8 @@ const categories: QuestionCategory[] = [
       {
         id: 'photos-7',
         label: 'A Body of Water',
-        requirements: 'Must be visible natural water (lake, river, stream)',
+        requirements:
+          'A named body of water from your hiding zone. Must not be the endgame. If none exists within 2 km, respond "null".',
         availability: 'All Games',
       },
       {
