@@ -22,25 +22,48 @@ interface EndgameState {
   exclusions: ExclusionCircle[]
 }
 
+// Single source of truth for the fixed hiding-zone radius choices.
+// The buttons render from this list, the default is the first entry, and
+// stored values are coerced back to one of these when dynamic mode is off.
+const FIXED_RADIUS_OPTIONS = [
+  { km: 0.5, label: '500 m' },
+  { km: 0.8, label: '800 m' },
+]
+const DEFAULT_RADIUS_KM = FIXED_RADIUS_OPTIONS[0].km
+const isFixedRadius = (km: number) => FIXED_RADIUS_OPTIONS.some((o) => o.km === km)
+
+function defaultEndgameState(): EndgameState {
+  return {
+    station: stations[0].name,
+    radiusKm: DEFAULT_RADIUS_KM,
+    zoom: 0,
+    center: null,
+    exclusions: [],
+  }
+}
+
 function loadState(): EndgameState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw)
+    if (raw) return { ...defaultEndgameState(), ...JSON.parse(raw) }
   } catch {
     /* corrupted */
   }
-  return { station: stations[0].name, radiusKm: 0.5, zoom: 0, center: null, exclusions: [] }
+  return defaultEndgameState()
 }
 
 function saveState(state: EndgameState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
 }
 
+const store = useStore()
 const saved = loadState()
 const selectedStation = ref(saved.station)
 const searchQuery = ref(saved.station)
 const showDropdown = ref(false)
-const radiusKm = ref(saved.radiusKm)
+const radiusKm = ref(
+  !store.flexibleHidingZone && !isFixedRadius(saved.radiusKm) ? DEFAULT_RADIUS_KM : saved.radiusKm,
+)
 const savedZoom = ref(saved.zoom)
 const savedCenter = ref<[number, number] | null>(saved.center)
 const exclusions = ref<ExclusionCircle[]>(saved.exclusions ?? [])
@@ -59,7 +82,6 @@ const closestStationName = computed(() => {
 let map: maplibregl.Map | null = null
 let constraining = false
 let gpsMarker: maplibregl.Marker | null = null
-const store = useStore()
 
 function haversineMeters(a: [number, number], b: [number, number]): number {
   const R = 6371000
@@ -640,6 +662,15 @@ watch(radiusKm, () => {
   persist()
 })
 
+watch(
+  () => store.flexibleHidingZone,
+  (flexible) => {
+    if (!flexible && !isFixedRadius(radiusKm.value)) {
+      radiusKm.value = DEFAULT_RADIUS_KM
+    }
+  },
+)
+
 watch(userPosition, () => {
   updateGpsMarker()
   // Auto-select closest station on first GPS fix if no explicit selection
@@ -748,11 +779,13 @@ const exclusionRadiusLabel = computed(() => {
           />
         </div>
         <div v-else class="toggle-radius">
-          <button :class="['radius-option', { active: radiusKm === 0.5 }]" @click="radiusKm = 0.5">
-            500 m
-          </button>
-          <button :class="['radius-option', { active: radiusKm === 0.8 }]" @click="radiusKm = 0.8">
-            800 m
+          <button
+            v-for="opt in FIXED_RADIUS_OPTIONS"
+            :key="opt.km"
+            :class="['radius-option', { active: radiusKm === opt.km }]"
+            @click="radiusKm = opt.km"
+          >
+            {{ opt.label }}
           </button>
         </div>
       </label>
