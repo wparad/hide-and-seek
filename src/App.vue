@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted } from 'vue'
 import { useStore } from './store'
 import StationList from './components/StationList.vue'
 import MapView from './components/MapView.vue'
@@ -13,6 +14,15 @@ const store = useStore()
 if (new URLSearchParams(window.location.search).has('endgame')) {
   store.setTab('endgame')
 }
+
+// Sync the active tab with browser/gesture back-navigation. Entering endgame pushes a history
+// entry (MapView popup), so a popstate while on endgame means the user backed out — return to map.
+function onPopState() {
+  if (new URLSearchParams(window.location.search).has('endgame')) store.setTab('endgame')
+  else if (store.activeTab === 'endgame') store.setTab('map')
+}
+onMounted(() => window.addEventListener('popstate', onPopState))
+onUnmounted(() => window.removeEventListener('popstate', onPopState))
 
 type Tab = 'map' | 'stations' | 'reachability' | 'endgame' | 'rules' | 'settings'
 
