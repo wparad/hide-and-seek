@@ -390,8 +390,19 @@ async function run() {
 
 const applyState = ref<'idle' | 'done'>('idle')
 
+// Lines that must never be marked off from the reachability screen — stations serving any of these
+// stay unmarked (green/enabled) even when they land in the unreachable set.
+const PROTECTED_LINES = ['S4', 'S5', 'S10', 'S17', 'S18']
+
+function servesProtectedLine(name: string): boolean {
+  const lines = store.getStationLines(name)
+  return lines.some((l) => PROTECTED_LINES.includes(l))
+}
+
 function applyToStations() {
-  const names = unreachableStations.value.map((s) => s.name)
+  const names = unreachableStations.value
+    .map((s) => s.name)
+    .filter((name) => !servesProtectedLine(name))
   store.crossOffAll(names, 'Unreachable (auto)')
   applyState.value = 'done'
   setTimeout(() => {
