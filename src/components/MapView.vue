@@ -52,8 +52,11 @@ const scissorAngle = ref(90) // degrees, 90 = vertical (north-south) bisect
 const scissorDistance = ref(500) // meters — distance between the two endpoint indicators
 const scissorFlipped = ref(false)
 const scissorReversed = ref(false) // swaps which endpoint is start vs end
-const SCISSOR_DISTANCES = [500, 1000, 2000, 3000, 4000, 5000]
+const SCISSOR_DISTANCES = [500, 1000, 2000, 3000, 4000, 5000, 15000]
 const stationsOnScissorSide = ref<Set<string>>(new Set())
+// In shared/locked mode, colour every station by which side of the bisect it's on:
+// 'hot' (toward the hotter/end endpoint) or 'cold' (toward the colder/start endpoint).
+const scissorStationSide = ref<Map<string, 'hot' | 'cold'>>(new Map())
 const scissorMarkOffCount = computed(
   () => [...stationsOnScissorSide.value].filter((n) => !(n in store.crossedOff)).length,
 )
@@ -679,6 +682,7 @@ function updateHotColdLabels() {
 
 function computeScissorSide() {
   const highlighted = new Set<string>()
+  const sideMap = new Map<string, 'hot' | 'cold'>()
   if (scissorCenter.value && map) {
     // Use screen-space math to match the visual bisect line
     const centerPx = map.project(scissorCenter.value as maplibregl.LngLatLike)
@@ -687,15 +691,19 @@ function computeScissorSide() {
     const nx = Math.cos(angleRad)
     const ny = -Math.sin(angleRad) // negate Y because screen Y is inverted
     const sign = scissorFlipped.value ? -1 : 1
+    // Hotter is toward the end endpoint (+normal); scissorReversed swaps start/end.
+    const hotSign = scissorReversed.value ? -1 : 1
     for (const s of stations) {
       const sPx = map.project(s.coordinates as maplibregl.LngLatLike)
       const dx = sPx.x - centerPx.x
       const dy = sPx.y - centerPx.y
-      const dot = (dx * nx + dy * ny) * sign
-      if (dot > 0) highlighted.add(s.name)
+      const proj = dx * nx + dy * ny
+      if (proj * sign > 0) highlighted.add(s.name)
+      sideMap.set(s.name, proj * hotSign > 0 ? 'hot' : 'cold')
     }
   }
   stationsOnScissorSide.value = highlighted
+  scissorStationSide.value = sideMap
 }
 
 function updateScissorVisuals() {
@@ -868,6 +876,9 @@ function buildGeoJSON(): GeoJSON.FeatureCollection {
             (!scissorLocked.value && stationsOnScissorSide.value.has(s.name))
               ? 'yes'
               : 'no',
+          scissorSide: scissorLocked.value
+            ? (scissorStationSide.value.get(s.name) ?? 'none')
+            : 'none',
         },
       })),
   }
@@ -898,6 +909,9 @@ function buildFavGeoJSON(): GeoJSON.FeatureCollection {
             (!scissorLocked.value && stationsOnScissorSide.value.has(s.name))
               ? 'yes'
               : 'no',
+          scissorSide: scissorLocked.value
+            ? (scissorStationSide.value.get(s.name) ?? 'none')
+            : 'none',
         },
       })),
   }
@@ -1097,6 +1111,10 @@ onMounted(() => {
 
     const statusColor: maplibregl.ExpressionSpecification = [
       'case',
+      ['==', ['get', 'scissorSide'], 'hot'],
+      '#dc2626',
+      ['==', ['get', 'scissorSide'], 'cold'],
+      '#2563eb',
       ['==', ['get', 'inRadius'], 'yes'],
       '#f59e0b',
       ['match', ['get', 'status'], 'available', '#22c55e', 'crossed-off', '#ef4444', '#9ca3af'],

@@ -177,6 +177,56 @@ async function fetchStationboard(station: string, datetime: string): Promise<Sta
   return result
 }
 
+// Second-pass connections check. Construction on some lines (S4, S10, S17, S18…) means the
+// replacement services don't show up in the train stationboard, so the BFS misses stations only
+// reachable via them. For each station the BFS left unreachable, we ask the connections API — with
+// no transportations filter, so replacement buses/trams count — whether the seeker can still get
+// there from the start station within the time budget.
+interface Connection {
+  to: { arrival: string | null }
+  transfers: number
+}
+
+const connectionsCache = new Map<string, Connection[]>()
+
+async function fetchConnections(
+  from: string,
+  to: string,
+  date: string,
+  time: string,
+): Promise<Connection[]> {
+  const cacheKey = `${from}|${to}|${date} ${time}`
+  const cached = connectionsCache.get(cacheKey)
+  if (cached) return cached
+
+  const params = new URLSearchParams({ from, to, date, time, limit: '4' })
+  let result: Connection[] = []
+  try {
+    const resp = await fetch(`https://transport.opendata.ch/v1/connections?${params}`)
+    if (resp.ok) {
+      const data = await resp.json()
+      result = data.connections ?? []
+    } else {
+      reach.log.push(`Second pass: API ${resp.status} for ${to}`)
+    }
+  } catch {
+    reach.log.push(`Second pass: request failed for ${to}`)
+  }
+  connectionsCache.set(cacheKey, result)
+  return result
+}
+
+const stationByName = new Map(stations.map((s) => [s.name, s]))
+
+// Name to query the API with — prefer an apiNames alias where the API uses a different spelling.
+function apiQueryName(name: string): string {
+  return stationByName.get(name)?.apiNames?.[0] ?? name
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 function getToday(): string {
   const d = new Date()
   return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`
@@ -288,8 +338,48 @@ async function run() {
       }
     }
 
+    // === Second pass ===
+    // The BFS only sees train departures, so construction-replacement services are invisible to it.
+    // For every station still unreachable, ask the connections API (all transport methods) whether
+    // a real journey from the start station arrives within the budget.
+    const startApiName = apiQueryName(reach.startStation)
+    const candidates = stations.filter(
+      (s) => !reach.results!.has(s.name) && s.name !== reach.startStation,
+    )
     reach.log.push(
-      `Done. ${reach.results!.size} reachable, ${unreachableStations.value.length} unreachable, ${apiCache.size} API calls`,
+      `Second pass: ${candidates.length} unreachable stations to check via connections`,
+    )
+    let recovered = 0
+    for (const s of candidates) {
+      const conns = await fetchConnections(
+        startApiName,
+        apiQueryName(s.name),
+        today,
+        reach.startTime,
+      )
+      // Earliest arrival that still lands within the allowed time frame.
+      let bestArrMin = Infinity
+      let bestArrival = ''
+      for (const c of conns) {
+        if (!c.to.arrival) continue
+        const arrival = parseISOTime(c.to.arrival)
+        const arrMin = timeToMinutes(arrival)
+        if (arrMin > deadlineMin) continue
+        if (arrMin < bestArrMin) {
+          bestArrMin = arrMin
+          bestArrival = arrival
+        }
+      }
+      if (bestArrival) {
+        reach.results!.set(s.name, { arrivalTime: bestArrival, path: [], needsOffset: false })
+        recovered++
+        reach.log.push(`Second pass: ${s.name} reachable via connections (arr ${bestArrival})`)
+      }
+      await sleep(500)
+    }
+
+    reach.log.push(
+      `Done. ${reach.results!.size} reachable (${recovered} via 2nd pass), ${unreachableStations.value.length} unreachable, ${apiCache.size} board + ${connectionsCache.size} connection calls`,
     )
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Unknown error'
