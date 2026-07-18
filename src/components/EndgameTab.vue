@@ -396,9 +396,14 @@ function getDrawCtx(): CanvasRenderingContext2D | null {
   const canvas = drawCanvas.value
   const container = mapEl.value
   const dpr = window.devicePixelRatio || 1
-  if (canvas.width !== container.clientWidth * dpr) {
-    canvas.width = container.clientWidth * dpr
-    canvas.height = container.clientHeight * dpr
+  // Round to whole pixels: canvas.width truncates floats, so comparing against
+  // a fractional clientWidth * dpr (fractional DPRs are common on Android) would
+  // always mismatch and resize — clearing the canvas — on every pointer move.
+  const targetW = Math.round(container.clientWidth * dpr)
+  const targetH = Math.round(container.clientHeight * dpr)
+  if (canvas.width !== targetW || canvas.height !== targetH) {
+    canvas.width = targetW
+    canvas.height = targetH
     canvas.style.width = `${container.clientWidth}px`
     canvas.style.height = `${container.clientHeight}px`
   }
@@ -692,11 +697,11 @@ watch(drawMode, (active) => {
     map.scrollZoom.disable()
     map.doubleClickZoom.disable()
     map.touchZoomRotate.disable()
-    // Size canvas immediately
+    // Size canvas immediately (rounded to match getDrawCtx's stable comparison)
     if (drawCanvas.value && mapEl.value) {
       const dpr = window.devicePixelRatio || 1
-      drawCanvas.value.width = mapEl.value.clientWidth * dpr
-      drawCanvas.value.height = mapEl.value.clientHeight * dpr
+      drawCanvas.value.width = Math.round(mapEl.value.clientWidth * dpr)
+      drawCanvas.value.height = Math.round(mapEl.value.clientHeight * dpr)
       drawCanvas.value.style.width = `${mapEl.value.clientWidth}px`
       drawCanvas.value.style.height = `${mapEl.value.clientHeight}px`
     }
