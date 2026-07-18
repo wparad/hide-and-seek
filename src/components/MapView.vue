@@ -462,6 +462,10 @@ function updateScissorMarkers() {
         scissorHandle.setLngLat(handlePos)
       }
     }
+  } else {
+    // Locked: remove any existing handle (e.g. after toggling lock at runtime)
+    scissorHandle?.remove()
+    scissorHandle = null
   }
 
   // Endpoint indicators (non-interactive) — colored by start/end
@@ -792,6 +796,13 @@ function shareBisect() {
 
 function reverseEndpoints() {
   scissorReversed.value = !scissorReversed.value
+  updateScissorVisuals()
+}
+
+// Switch between edit mode (draggable handle, controls, mark-off) and locked read-only
+// shared view (hot/cold coloring). updateScissorVisuals re-renders the handle and station colors.
+function toggleScissorLock() {
+  scissorLocked.value = !scissorLocked.value
   updateScissorVisuals()
 }
 
@@ -1556,6 +1567,9 @@ watch(userPosition, () => {
       </div>
       <div v-if="scissorCenter" class="scissor-actions">
         <button class="scissor-cancel-btn" @click="clearScissor">Cancel</button>
+        <button class="scissor-lock-btn" @click="toggleScissorLock">
+          {{ scissorLocked ? '🔓 Unlock' : '🔒 Lock' }}
+        </button>
         <template v-if="!scissorLocked">
           <button class="scissor-flip-btn" @click="reverseEndpoints">⟳ Reverse</button>
           <button class="scissor-share-btn" @click="shareBisect">🔗 Share</button>
@@ -2001,6 +2015,17 @@ watch(userPosition, () => {
   border-radius: 6px;
   background: #fff;
   color: #dc2626;
+  cursor: pointer;
+}
+
+.scissor-lock-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid #d97706;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #b45309;
   cursor: pointer;
 }
 
