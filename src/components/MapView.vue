@@ -51,7 +51,6 @@ const scissorCenter = ref<[number, number] | null>(null)
 const scissorAngle = ref(90) // degrees, 90 = vertical (north-south) bisect
 const scissorDistance = ref(500) // meters — distance between the two endpoint indicators
 const scissorFlipped = ref(false)
-const scissorReversed = ref(false) // swaps which endpoint is start vs end
 const SCISSOR_DISTANCES = [500, 1000, 2000, 3000, 4000, 5000, 15000]
 const stationsOnScissorSide = ref<Set<string>>(new Set())
 // In shared/locked mode, colour every station by which side of the bisect it's on:
@@ -125,7 +124,6 @@ function buildPopupHTML(name: string): string {
   const fav = store.favorites.includes(name)
   const lines = store.getStationLines(name)
   const linesText = lines.length ? lines.join(', ') : 'no line data'
-  const query = encodeURIComponent(`${name} Bahnhof ZVV`)
   const reason = store.getCrossOffReason(name)
   const reasonHtml =
     crossed && reason ? `<div class="map-popup-reason">Reason: ${reason}</div>` : ''
@@ -142,9 +140,6 @@ function buildPopupHTML(name: string): string {
         <span>${crossed ? 'Marked off' : 'Available'}</span>
       </label>
       <div class="map-popup-actions">
-        <a class="map-popup-link" href="https://www.google.com/search?q=${query}" target="_blank" rel="noopener">
-          Search Google
-        </a>
         <a class="map-popup-endgame" href="?endgame=${encodeURIComponent(name)}" data-action="endgame">🎯 Endgame</a>
       </div>
     </div>
@@ -276,8 +271,11 @@ function updateRadiusCircle() {
 
 function handleMapClick(e: maplibregl.MapMouseEvent) {
   if (scissorMode.value) {
-    scissorCenter.value = [e.lngLat.lng, e.lngLat.lat]
-    updateScissorLayers()
+    // Locked bisect: geometry is frozen, so taps don't move the center — the rest of the map stays usable.
+    if (!scissorLocked.value) {
+      scissorCenter.value = [e.lngLat.lng, e.lngLat.lat]
+      updateScissorLayers()
+    }
     return
   }
   if (!radiusMode.value) return
@@ -468,29 +466,27 @@ function updateScissorMarkers() {
     scissorHandle = null
   }
 
-  // Endpoint indicators (non-interactive) — colored by start/end
-  // A is at endpoints[0] (positive direction), B at endpoints[1]
-  // If reversed: B is end (hotter/red), A is start (colder/blue) — else opposite
+  // Endpoint indicators (non-interactive) — colored by start/end.
+  // Fixed convention: endpoints[0] (+angle) = end (hotter/red), endpoints[1] (−angle) = start
+  // (colder/blue). Reverse rotates the angle 180°, which swaps the two endpoints' positions.
   const endpoints = getScissorEndpoints()
   if (endpoints) {
     const endColor = '#dc2626' // red = hotter = end
     const startColor = '#2563eb' // blue = colder = start
-    const colorA = scissorReversed.value ? startColor : endColor
-    const colorB = scissorReversed.value ? endColor : startColor
 
     // Recreate to update color
     scissorEndpointA?.remove()
     scissorEndpointB?.remove()
-    scissorEndpointA = new maplibregl.Marker({ element: createEndpointEl(colorA) })
+    scissorEndpointA = new maplibregl.Marker({ element: createEndpointEl(endColor) })
       .setLngLat(endpoints[0])
       .addTo(map)
-    scissorEndpointB = new maplibregl.Marker({ element: createEndpointEl(colorB) })
+    scissorEndpointB = new maplibregl.Marker({ element: createEndpointEl(startColor) })
       .setLngLat(endpoints[1])
       .addTo(map)
 
     // Arrow line from start → end
-    const startIdx = scissorReversed.value ? 0 : 1
-    const endIdx = scissorReversed.value ? 1 : 0
+    const startIdx = 1
+    const endIdx = 0
     const arrowSource = map.getSource('scissor-arrow') as maplibregl.GeoJSONSource | undefined
     if (arrowSource) {
       arrowSource.setData({
@@ -574,16 +570,9 @@ function updateSideOverlays() {
     centerPx.y + ext * Math.sin(perpAngleRad),
   ]
 
-  // Hot side: extend from line toward end point direction
-  const sign = scissorReversed.value ? -1 : 1
-  const hotOffset: [number, number] = [
-    sign * ext * Math.cos(angleRad),
-    -sign * ext * Math.sin(angleRad),
-  ]
-  const coldOffset: [number, number] = [
-    -sign * ext * Math.cos(angleRad),
-    sign * ext * Math.sin(angleRad),
-  ]
+  // Hot side: extend from line toward the end endpoint (+angle direction)
+  const hotOffset: [number, number] = [ext * Math.cos(angleRad), -ext * Math.sin(angleRad)]
+  const coldOffset: [number, number] = [-ext * Math.cos(angleRad), ext * Math.sin(angleRad)]
 
   const hotPoly = [
     lineP1,
@@ -649,19 +638,17 @@ function updateHotColdLabels() {
 
   const centerPx = map.project(scissorCenter.value as maplibregl.LngLatLike)
   const angleRad = (scissorAngle.value * Math.PI) / 180
-  // "End" direction = toward endpoint A by default, or B if reversed
-  const sign = scissorReversed.value ? -1 : 1
   const labelOffset = 120 // px from center
 
-  // Hotter = toward end point (positive endpoint direction)
+  // Hotter = toward the end endpoint (+angle direction)
   const hotPx: [number, number] = [
-    centerPx.x + sign * labelOffset * Math.cos(angleRad),
-    centerPx.y - sign * labelOffset * Math.sin(angleRad),
+    centerPx.x + labelOffset * Math.cos(angleRad),
+    centerPx.y - labelOffset * Math.sin(angleRad),
   ]
-  // Colder = toward start point (negative endpoint direction)
+  // Colder = toward the start endpoint (−angle direction)
   const coldPx: [number, number] = [
-    centerPx.x - sign * labelOffset * Math.cos(angleRad),
-    centerPx.y + sign * labelOffset * Math.sin(angleRad),
+    centerPx.x - labelOffset * Math.cos(angleRad),
+    centerPx.y + labelOffset * Math.sin(angleRad),
   ]
 
   const hotLngLat = map.unproject(hotPx)
@@ -695,15 +682,14 @@ function computeScissorSide() {
     const nx = Math.cos(angleRad)
     const ny = -Math.sin(angleRad) // negate Y because screen Y is inverted
     const sign = scissorFlipped.value ? -1 : 1
-    // Hotter is toward the end endpoint (+normal); scissorReversed swaps start/end.
-    const hotSign = scissorReversed.value ? -1 : 1
+    // Hotter is toward the end endpoint (+normal direction).
     for (const s of stations) {
       const sPx = map.project(s.coordinates as maplibregl.LngLatLike)
       const dx = sPx.x - centerPx.x
       const dy = sPx.y - centerPx.y
       const proj = dx * nx + dy * ny
       if (proj * sign > 0) highlighted.add(s.name)
-      sideMap.set(s.name, proj * hotSign > 0 ? 'hot' : 'cold')
+      sideMap.set(s.name, proj > 0 ? 'hot' : 'cold')
     }
   }
   stationsOnScissorSide.value = highlighted
@@ -770,7 +756,8 @@ function loadBisectFromUrl(): boolean {
   scissorCenter.value = [parts[0], parts[1]]
   scissorAngle.value = parts[2]
   scissorDistance.value = parts[3]
-  if (parts.length >= 5) scissorReversed.value = parts[4] === 1
+  // Back-compat: old links carried a 5th "reversed" flag; apply it as a 180° rotation.
+  if (parts.length >= 5 && parts[4] === 1) scissorAngle.value = (parts[2] + 180) % 360
   scissorLocked.value = true
   return true
 }
@@ -789,13 +776,32 @@ function shareBisect() {
   url.searchParams.delete('c') // don't share crossed-off state
   url.searchParams.set(
     'bisect',
-    `${lng.toFixed(6)},${lat.toFixed(6)},${scissorAngle.value},${scissorDistance.value},${scissorReversed.value ? 1 : 0}`,
+    `${lng.toFixed(6)},${lat.toFixed(6)},${scissorAngle.value},${scissorDistance.value}`,
   )
   navigator.clipboard.writeText(url.toString())
 }
 
+// Remove the ?bisect= param so a shared/locked view isn't reasserted after unlocking or cancelling.
+function clearBisectUrlParam() {
+  const url = new URL(window.location.href)
+  if (url.searchParams.has('bisect')) {
+    url.searchParams.delete('bisect')
+    history.replaceState(null, '', url)
+  }
+}
+
+// Copy one endpoint's coordinate (lat,lng) to the clipboard. Fixed convention:
+// end = endpoints[0] (+angle, hotter), start = endpoints[1] (−angle, colder).
+function copyScissorEndpoint(which: 'start' | 'end') {
+  const endpoints = getScissorEndpoints()
+  if (!endpoints) return
+  const [lng, lat] = which === 'end' ? endpoints[0] : endpoints[1]
+  navigator.clipboard.writeText(`${lat.toFixed(6)},${lng.toFixed(6)}`)
+}
+
+// Reverse rotates the whole bisect 180° — endpoints swap, hotter/colder flips, arrow reverses.
 function reverseEndpoints() {
-  scissorReversed.value = !scissorReversed.value
+  scissorAngle.value = (scissorAngle.value + 180) % 360
   updateScissorVisuals()
 }
 
@@ -803,6 +809,7 @@ function reverseEndpoints() {
 // shared view (hot/cold coloring). updateScissorVisuals re-renders the handle and station colors.
 function toggleScissorLock() {
   scissorLocked.value = !scissorLocked.value
+  if (!scissorLocked.value) clearBisectUrlParam()
   updateScissorVisuals()
 }
 
@@ -810,10 +817,10 @@ function determineStartEndFromGps() {
   if (!scissorCenter.value || !userPosition.value) return
   const endpoints = getScissorEndpoints()
   if (!endpoints) return
-  const distA = haversineMeters(userPosition.value, endpoints[0])
-  const distB = haversineMeters(userPosition.value, endpoints[1])
-  // Start = closer to GPS. Default: B is start. If A is closer, reverse.
-  scissorReversed.value = distA < distB
+  const distA = haversineMeters(userPosition.value, endpoints[0]) // end endpoint
+  const distB = haversineMeters(userPosition.value, endpoints[1]) // start endpoint
+  // Start (endpoints[1]) should be nearest to GPS; if the end is closer, rotate 180° to swap them.
+  if (distA < distB) scissorAngle.value = (scissorAngle.value + 180) % 360
 }
 
 function updateGpsMarker() {
@@ -830,6 +837,7 @@ function updateGpsMarker() {
 
 function clearScissor() {
   // Just hide UI — don't reset saved state
+  clearBisectUrlParam()
   scissorHandle?.remove()
   scissorCenterMarker?.remove()
   scissorEndpointA?.remove()
@@ -1467,7 +1475,7 @@ watch(userPosition, () => {
         </button>
         <button
           :class="['menu-item', { active: radiusMode }]"
-          @click="((radiusMode = !radiusMode), (menuOpen = false))"
+          @click="(radiusMode ? clearRadius() : (radiusMode = true), (menuOpen = false))"
         >
           📍 Radius
         </button>
@@ -1526,15 +1534,17 @@ watch(userPosition, () => {
       />
       <div class="radius-hint">
         {{ radiusCenter ? 'Tap map to move center' : 'Tap map to place circle' }}
-        <button v-if="radiusCenter" class="radius-clear" @click="clearRadius">Clear</button>
       </div>
-      <div v-if="radiusCenter && stationsInRadius.size > 0" class="radius-actions">
-        <button class="radius-action-btn" @click="crossOffInRadius">
-          Mark off inside ({{ radiusInsideCount }})
-        </button>
-        <button class="radius-action-btn" @click="crossOffOutsideRadius">
-          Mark off outside ({{ radiusOutsideCount }})
-        </button>
+      <div v-if="radiusCenter" class="radius-actions">
+        <button class="radius-action-btn radius-clear-btn" @click="clearRadius">Clear</button>
+        <template v-if="stationsInRadius.size > 0">
+          <button class="radius-action-btn" @click="crossOffInRadius">
+            Inside ({{ radiusInsideCount }})
+          </button>
+          <button class="radius-action-btn" @click="crossOffOutsideRadius">
+            Outside ({{ radiusOutsideCount }})
+          </button>
+        </template>
       </div>
     </div>
 
@@ -1570,17 +1580,21 @@ watch(userPosition, () => {
         <button class="scissor-lock-btn" @click="toggleScissorLock">
           {{ scissorLocked ? '🔓 Unlock' : '🔒 Lock' }}
         </button>
-        <template v-if="!scissorLocked">
-          <button class="scissor-flip-btn" @click="reverseEndpoints">⟳ Reverse</button>
-          <button class="scissor-share-btn" @click="shareBisect">🔗 Share</button>
-          <button
-            v-if="scissorMarkOffCount > 0"
-            class="scissor-markoff-btn"
-            @click="markOffScissorSide"
-          >
-            Mark off {{ scissorMarkOffCount }}
-          </button>
-        </template>
+        <button v-if="!scissorLocked" class="scissor-flip-btn" @click="reverseEndpoints">
+          ⟳ Reverse
+        </button>
+        <button class="scissor-copy-btn" @click="copyScissorEndpoint('start')">
+          📋 Copy start
+        </button>
+        <button class="scissor-copy-btn" @click="copyScissorEndpoint('end')">📋 Copy end</button>
+        <button class="scissor-share-btn" @click="shareBisect">🔗 Share</button>
+        <button
+          v-if="scissorMarkOffCount > 0"
+          class="scissor-markoff-btn"
+          @click="markOffScissorSide"
+        >
+          Mark off {{ scissorMarkOffCount }}
+        </button>
       </div>
     </div>
 
@@ -1751,9 +1765,9 @@ watch(userPosition, () => {
 
 .radius-panel {
   position: absolute;
-  top: 12px;
+  bottom: 12px;
   left: 12px;
-  right: 60px;
+  right: 12px;
   background: #fff;
   border-radius: 10px;
   padding: 10px 14px;
@@ -1773,26 +1787,17 @@ watch(userPosition, () => {
 }
 
 .radius-slider {
-  width: 100%;
+  display: block;
+  width: 50%;
+  margin: 4px auto;
   accent-color: #f59e0b;
 }
 
 .radius-hint {
   font-size: 12px;
   color: #888;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  text-align: center;
   margin-top: 4px;
-}
-
-.radius-clear {
-  padding: 3px 10px;
-  font-size: 12px;
-  background: #f0f0f0;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  cursor: pointer;
 }
 
 .radius-actions {
@@ -1811,6 +1816,12 @@ watch(userPosition, () => {
   background: #e44;
   color: #fff;
   cursor: pointer;
+}
+
+.radius-clear-btn {
+  background: #f0f0f0;
+  border: 1px solid #ddd;
+  color: #333;
 }
 
 .scissor-panel {
@@ -1970,8 +1981,20 @@ watch(userPosition, () => {
 
 .scissor-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
+}
+
+.scissor-copy-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid #0d9488;
+  border-radius: 6px;
+  background: #f0fdfa;
+  color: #0f766e;
+  cursor: pointer;
 }
 
 .scissor-cancel-btn {
@@ -2165,17 +2188,6 @@ watch(userPosition, () => {
   height: 16px;
   accent-color: #0066cc;
   cursor: pointer;
-}
-
-.map-popup-link {
-  display: block;
-  font-size: 13px;
-  color: #0066cc;
-  text-decoration: none;
-}
-
-.map-popup-link:hover {
-  text-decoration: underline;
 }
 
 .map-popup-actions {
