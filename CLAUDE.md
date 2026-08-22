@@ -25,16 +25,18 @@ Deployed to GitHub Pages from `dist/`.
 | `src/store.ts` | Singleton reactive store — all state, actions, history, localStorage |
 | `src/stations.ts` | Static data — 180 stations with coordinates and line mappings |
 | `src/App.vue` | Root layout — header, tab switching, bottom tab bar |
-| `src/components/ActionsTab.vue` | Reset button + confirmation modal |
-| `src/components/HistoryList.vue` | Toggle/delete actions |
+| `src/components/SettingsTab.vue` | Reset button + confirmation modal, map layer toggles |
 | `src/components/StationList.vue` | Primary game screen — checkboxes to cross off stations, view filters (line, status, text) |
 
 ## Data flow
 
 1. `stations.ts` exports the full station list (bundled at build time, never in localStorage)
-2. `store.ts` holds `GameAction[]` in reactive state, persisted to localStorage key `hide-and-seek-zurich`
-3. `crossedOff: string[]` tracks individually eliminated stations, persisted to localStorage
-4. `filteredStations` is a computed that replays all enabled actions against the full station list
+2. `store.ts` holds one unified `ToolEntry[]` history in reactive state, persisted to localStorage
+   key `hide-and-seek-zurich`. Every way of crossing off a station — manual toggle, bulk mark-off,
+   the bisect/radius/endgame/distance map tools — is a `ToolEntry` with its own `type`, `enabled`
+   flag, and the exact `stations` list it produces. Nothing mutates a crossed-off set directly.
+3. `crossedOff` is a computed union of every *enabled* entry's `stations` — disabling an entry
+   (rather than deleting it) is the normal way to undo a tool's application.
 4. Components read from the store singleton via `useStore()`
 
 ## Station data provenance
@@ -49,8 +51,8 @@ Deployed to GitHub Pages from `dist/`.
 
 - NEVER store station data in localStorage — it's static and bundled
 - NEVER modify `stations.ts` by hand — regenerate from Overpass data if updates are needed
-- Every filter action gets a unique ID (`crypto.randomUUID()`) and is togglable
-- The filter chain is deterministic: same enabled actions in same order → same result
+- Every tool history entry gets a unique ID (`crypto.randomUUID()`) and is togglable
+- `crossedOff` is always derived, never written to directly — add a `ToolEntry` instead
 
 ## Data Maintenance
 

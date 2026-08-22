@@ -19,6 +19,10 @@ interface Zone {
   center: [number, number]
   radiusM: number
   inside: boolean
+  // false only while a newly-placed zone hasn't been Saved yet — center/radius are still
+  // editable by clicking/dragging. Missing on data saved before this field existed, which is
+  // treated as already-saved (locked) below.
+  locked: boolean
 }
 
 interface EndgameState {
@@ -61,6 +65,7 @@ function loadState(): EndgameState {
         center: z.center as [number, number],
         radiusM: z.radiusM ?? 500,
         inside: z.inside ?? false,
+        locked: z.locked ?? true,
       }))
       return { ...defaultEndgameState(), ...parsed, zones }
     }
@@ -87,7 +92,6 @@ const savedCenter = ref<[number, number] | null>(saved.center)
 const zones = ref<Zone[]>(saved.zones ?? [])
 const selectedZone = ref<string | null>(null)
 const placingMode = ref(false)
-const showClearZonesModal = ref(false)
 const mapEl = ref<HTMLDivElement | null>(null)
 const rulerCanvas = ref<HTMLCanvasElement | null>(null)
 const drawCanvas = ref<HTMLCanvasElement | null>(null)
@@ -100,6 +104,7 @@ const closestStationName = computed(() => {
 let map: maplibregl.Map | null = null
 let constraining = false
 let gpsMarker: maplibregl.Marker | null = null
+let zoneEdgeHandle: maplibregl.Marker | null = null
 
 function haversineMeters(a: [number, number], b: [number, number]): number {
   const R = 6371000
@@ -163,6 +168,7 @@ function decodeZones(raw: string): Zone[] {
         center: [lng, lat] as [number, number],
         radiusM,
         inside: inside === 1,
+        locked: true,
       }
     })
 }
@@ -189,10 +195,12 @@ function shareEndgame() {
   else url.searchParams.delete('zones')
   navigator.clipboard.writeText(url.toString())
   showToast('Link copied', 'success')
-  store.addToolHistoryEntry('endgame', {
-    station: selectedStation.value,
-    radiusKm: radiusKm.value,
-    zones: zones.value.map((z) => ({ center: z.center, radiusM: z.radiusM, inside: z.inside })),
+  store.addTool('endgame', `Endgame · ${selectedStation.value}`, [], {
+    params: {
+      station: selectedStation.value,
+      radiusKm: radiusKm.value,
+      zones: zones.value.map((z) => ({ center: z.center, radiusM: z.radiusM, inside: z.inside })),
+    },
   })
 }
 
@@ -346,12 +354,14 @@ function addZone(lngLat: [number, number]) {
   const z: Zone = {
     id: crypto.randomUUID(),
     center: lngLat,
-    radiusM: 500,
+    radiusM: 250,
     inside: false,
+    locked: false,
   }
   zones.value.push(z)
   selectedZone.value = z.id
   updateZoneLayers()
+  updateZoneEdgeHandle()
   persist()
 }
 
@@ -360,22 +370,16 @@ function removeZone(id: string) {
   if (idx !== -1) zones.value.splice(idx, 1)
   if (selectedZone.value === id) selectedZone.value = null
   updateZoneLayers()
-  persist()
-}
-
-function removeAllZones() {
-  zones.value.splice(0, zones.value.length)
-  selectedZone.value = null
-  showClearZonesModal.value = false
-  updateZoneLayers()
+  updateZoneEdgeHandle()
   persist()
 }
 
 function updateZoneRadius(id: string, radiusM: number) {
   const z = zones.value.find((z) => z.id === id)
-  if (z) {
+  if (z && !z.locked) {
     z.radiusM = radiusM
     updateZoneLayers()
+    updateZoneEdgeHandle()
     persist()
   }
 }
@@ -387,6 +391,21 @@ function updateZoneInside(id: string, inside: boolean) {
     updateZoneLayers()
     persist()
   }
+}
+
+// Save locks the zone's position/radius against accidental further edits (Remove still works);
+// Cancel discards the never-saved zone outright.
+function saveZone(id: string) {
+  const z = zones.value.find((z) => z.id === id)
+  if (z) {
+    z.locked = true
+    updateZoneEdgeHandle()
+    persist()
+  }
+}
+
+function cancelZone(id: string) {
+  removeZone(id)
 }
 
 function persist() {
@@ -606,12 +625,66 @@ function handleMapClick(e: maplibregl.MapMouseEvent) {
   if (features.length > 0) {
     const id = features[0].properties?.id
     if (id) {
+      // Clicking a zone's center always re-opens its panel, even once saved/locked.
       selectedZone.value = selectedZone.value === id ? null : id
       updateZoneLayers()
+      updateZoneEdgeHandle()
     }
-  } else {
-    selectedZone.value = null
+    return
+  }
+  // Tapping elsewhere on the map moves the selected zone's center — but only while it's still
+  // unsaved, so a saved zone can't be nudged by an accidental tap.
+  if (activeZone.value && !activeZone.value.locked) {
+    activeZone.value.center = [e.lngLat.lng, e.lngLat.lat]
     updateZoneLayers()
+    updateZoneEdgeHandle()
+    persist()
+    return
+  }
+  selectedZone.value = null
+  updateZoneLayers()
+  updateZoneEdgeHandle()
+}
+
+// Point due east of the zone's center at its current radius — the draggable handle that resizes
+// the zone without moving its center.
+function zoneEdgePoint(z: Zone): [number, number] {
+  const dLngPerM = 1 / (111320 * Math.cos((z.center[1] * Math.PI) / 180))
+  return [z.center[0] + z.radiusM * dLngPerM, z.center[1]]
+}
+
+function createEdgeHandleEl(): HTMLDivElement {
+  const el = document.createElement('div')
+  el.style.cssText =
+    'width:22px;height:22px;border-radius:50%;background:#0ea5e9;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:ew-resize;touch-action:none;'
+  return el
+}
+
+function onZoneEdgeDrag() {
+  if (!zoneEdgeHandle || !activeZone.value) return
+  const { lng, lat } = zoneEdgeHandle.getLngLat()
+  const radiusM = haversineMeters(activeZone.value.center, [lng, lat])
+  updateZoneRadius(activeZone.value.id, Math.max(10, Math.round(radiusM)))
+}
+
+// Shows a draggable handle on the edge of the selected zone's circle while it's still unsaved —
+// dragging it changes only the radius, never the center.
+function updateZoneEdgeHandle() {
+  if (!map) return
+  const z = activeZone.value
+  if (!z || z.locked) {
+    zoneEdgeHandle?.remove()
+    zoneEdgeHandle = null
+    return
+  }
+  const pos = zoneEdgePoint(z)
+  if (!zoneEdgeHandle) {
+    zoneEdgeHandle = new maplibregl.Marker({ element: createEdgeHandleEl(), draggable: true })
+      .setLngLat(pos)
+      .addTo(map)
+    zoneEdgeHandle.on('drag', onZoneEdgeDrag)
+  } else {
+    zoneEdgeHandle.setLngLat(pos)
   }
 }
 
@@ -792,6 +865,7 @@ onMounted(() => {
 onUnmounted(() => {
   persist()
   gpsMarker?.remove()
+  zoneEdgeHandle?.remove()
   map?.remove()
   map = null
 })
@@ -966,13 +1040,6 @@ const zoneRadiusLabel = computed(() => {
           >
             {{ placingMode ? 'Cancel' : '+ Zone' }}
           </button>
-          <button
-            v-if="zones.length > 0"
-            class="excl-btn excl-clear-btn"
-            @click="showClearZonesModal = true"
-          >
-            Remove all ({{ zones.length }})
-          </button>
         </div>
 
         <div v-if="activeZone" class="excl-selected">
@@ -990,7 +1057,7 @@ const zoneRadiusLabel = computed(() => {
               Inside (must be within)
             </button>
           </div>
-          <label class="endgame-field">
+          <label v-if="!activeZone.locked" class="endgame-field">
             <span class="endgame-label">Zone radius: {{ zoneRadiusLabel }}</span>
             <input
               :value="activeZone.radiusM"
@@ -1004,6 +1071,16 @@ const zoneRadiusLabel = computed(() => {
               "
             />
           </label>
+          <div v-else class="endgame-field">
+            <span class="endgame-label">Zone radius: {{ zoneRadiusLabel }} · saved</span>
+          </div>
+          <div v-if="!activeZone.locked" class="zone-save-row">
+            <button class="zone-cancel-btn" @click="cancelZone(activeZone!.id)">Cancel</button>
+            <button class="zone-save-btn" @click="saveZone(activeZone!.id)">Save</button>
+          </div>
+          <div v-if="!activeZone.locked" class="placing-hint-inline">
+            Tap the map to move · drag the blue handle to resize
+          </div>
           <button class="excl-remove-btn" @click="removeZone(activeZone!.id)">Remove</button>
         </div>
       </div>
@@ -1051,20 +1128,6 @@ const zoneRadiusLabel = computed(() => {
           </template>
         </div>
         <div v-if="placingMode" class="placing-hint">Tap map to place zone</div>
-      </div>
-    </Teleport>
-
-    <Teleport to="body">
-      <div v-if="showClearZonesModal" class="overlay" @click.self="showClearZonesModal = false">
-        <div class="modal">
-          <p class="modal-text">Remove all {{ zones.length }} zones?</p>
-          <div class="modal-buttons">
-            <button class="modal-btn cancel-btn" @click="showClearZonesModal = false">
-              Cancel
-            </button>
-            <button class="modal-btn confirm-btn" @click="removeAllZones">Remove all</button>
-          </div>
-        </div>
       </div>
     </Teleport>
   </div>
@@ -1235,11 +1298,6 @@ const zoneRadiusLabel = computed(() => {
   flex-wrap: wrap;
 }
 
-.excl-clear-btn {
-  border-color: #888;
-  color: #888;
-}
-
 .excl-btn {
   padding: 8px 14px;
   background: #fff;
@@ -1288,6 +1346,39 @@ const zoneRadiusLabel = computed(() => {
   background: #0ea5e9;
   color: #fff;
   border-color: #0ea5e9;
+}
+
+.zone-save-row {
+  display: flex;
+  gap: 8px;
+}
+
+.zone-cancel-btn,
+.zone-save-btn {
+  flex: 1;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  border: 1px solid #d0d0d0;
+}
+
+.zone-cancel-btn {
+  background: #fff;
+  color: #666;
+}
+
+.zone-save-btn {
+  background: #16a34a;
+  color: #fff;
+  border-color: #16a34a;
+}
+
+.placing-hint-inline {
+  font-size: 11px;
+  color: #888;
 }
 
 .excl-remove-btn {

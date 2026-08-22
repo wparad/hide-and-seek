@@ -5,13 +5,15 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import {
   useStore,
   type MapLayerVisibility,
-  type ToolHistoryEntry,
+  type ToolEntry,
   type BisectHistoryParams,
   type RadiusHistoryParams,
   type EndgameHistoryParams,
+  type DistanceHistoryParams,
 } from '../store'
 import { stations, locations, buildGeoLines } from '../stations'
 import { userPosition } from '../gps'
+import { showToast } from '../toast'
 
 const store = useStore()
 const mapEl = ref<HTMLDivElement | null>(null)
@@ -20,7 +22,6 @@ const hideCrossedOff = ref(false)
 const showLocations = ref(true)
 const menuOpen = ref(false)
 const showHistory = ref(false)
-const historyTab = ref<'stations' | 'tools'>('stations')
 const stationSearch = ref('')
 const hideNonMatching = ref(false)
 const hideTrainLines = ref(false)
@@ -52,6 +53,16 @@ const radiusLocked = ref(false) // true when loaded from URL — read-only previ
 const radiusMeters = ref(5000)
 const radiusCenter = ref<[number, number] | null>(null)
 const stationsInRadius = ref<Set<string>>(new Set())
+// Undo-capable apply toggle per side — reset whenever the circle's position/size changes (see
+// resetRadiusToolIds call sites).
+const radiusInsideToolId = ref<string | null>(null)
+const radiusOutsideToolId = ref<string | null>(null)
+const radiusInsideMarked = computed(
+  () => radiusInsideToolId.value !== null && store.isToolEnabled(radiusInsideToolId.value),
+)
+const radiusOutsideMarked = computed(
+  () => radiusOutsideToolId.value !== null && store.isToolEnabled(radiusOutsideToolId.value),
+)
 
 // Scissor (bisect) tool state
 const scissorMode = ref(false)
@@ -65,12 +76,26 @@ const stationsOnScissorSide = ref<Set<string>>(new Set())
 // Colour every station by which side of the bisect it's on:
 // 'hot' (toward the end/red endpoint — will be/was marked off) or 'cold' (toward start/green — stays).
 const scissorStationSide = ref<Map<string, 'hot' | 'cold'>>(new Map())
-const scissorMarkOffCount = computed(
-  () => [...stationsOnScissorSide.value].filter((n) => !(n in store.crossedOff)).length,
+const scissorHotStations = computed(() =>
+  [...stationsOnScissorSide.value].filter((n) => !(n in store.crossedOff)),
 )
-// Undo-capable mark-off toggle — reset whenever a genuinely new bisect starts (see resetScissorMarkOff call sites).
-const scissorMarkedOff = ref(false)
-const scissorMarkedOffEventIds = ref<string[]>([])
+const scissorColdStations = computed(() =>
+  stations
+    .map((s) => s.name)
+    .filter(
+      (n) => !stationsOnScissorSide.value.has(n) && scissorStart.value && !(n in store.crossedOff),
+    ),
+)
+// Undo-capable mark toggle per side — reset whenever a genuinely new bisect starts (see
+// resetScissorToolIds call sites).
+const scissorHotToolId = ref<string | null>(null)
+const scissorColdToolId = ref<string | null>(null)
+const scissorHotMarked = computed(
+  () => scissorHotToolId.value !== null && store.isToolEnabled(scissorHotToolId.value),
+)
+const scissorColdMarked = computed(
+  () => scissorColdToolId.value !== null && store.isToolEnabled(scissorColdToolId.value),
+)
 const radiusInsideCount = computed(
   () => [...stationsInRadius.value].filter((n) => !(n in store.crossedOff)).length,
 )
@@ -79,11 +104,32 @@ const radiusOutsideCount = computed(
     stations.filter((s) => !stationsInRadius.value.has(s.name) && !(s.name in store.crossedOff))
       .length,
 )
-let scissorEndpointA: maplibregl.Marker | null = null // hot/red — draggable, sets angle
-let scissorEndpointB: maplibregl.Marker | null = null // cold/blue — start point, non-interactive
+let scissorEndpointA: maplibregl.Marker | null = null // hot/red — indicator only
+let scissorEndpointB: maplibregl.Marker | null = null // cold/blue — start point indicator only
+let scissorHandle: maplibregl.Marker | null = null // separate, large drag handle on the bisect line
 let arrowHeadA: maplibregl.Marker | null = null
 let arrowHeadB: maplibregl.Marker | null = null
+let hotterMarker: maplibregl.Marker | null = null
+let colderMarker: maplibregl.Marker | null = null
 let radiusCenterMarker: maplibregl.Marker | null = null
+// Fixed px offset from center along the bisect line — deliberately far from the endpoint so the
+// handle never overlaps the endpoint's coordinate display, and large enough to grab easily.
+const HANDLE_OFFSET_PX = 110
+
+// Share popup (bisect/radius) state
+const shareModalKind = ref<'bisect' | 'radius' | null>(null)
+
+// Distance tool state
+const distanceMode = ref(false)
+const distancePointA = ref<[number, number] | null>(null)
+const distancePointB = ref<[number, number] | null>(null)
+let distanceMarkerA: maplibregl.Marker | null = null
+let distanceMarkerB: maplibregl.Marker | null = null
+const distanceMarkings = computed(() =>
+  store.tools.filter(
+    (t): t is ToolEntry & { params: DistanceHistoryParams } => t.type === 'distance' && t.enabled,
+  ),
+)
 
 // GPS location state
 let gpsMarker: maplibregl.Marker | null = null
@@ -288,6 +334,7 @@ function onRadiusCenterDrag() {
   if (!radiusCenterMarker) return
   const { lng, lat } = radiusCenterMarker.getLngLat()
   radiusCenter.value = [lng, lat]
+  resetRadiusToolIds()
   updateRadiusCircle()
   ;(map?.getSource('stations') as maplibregl.GeoJSONSource | undefined)?.setData(buildGeoJSON())
   ;(map?.getSource('favorites') as maplibregl.GeoJSONSource | undefined)?.setData(buildFavGeoJSON())
@@ -317,7 +364,9 @@ function handleMapClick(e: maplibregl.MapMouseEvent) {
   // While a tool is actively placing, snap taps to the exact coordinates of a tapped station
   // instead of the raw click lng/lat.
   const toolPlacing =
-    (scissorMode.value && !scissorLocked.value) || (radiusMode.value && !radiusLocked.value)
+    (scissorMode.value && !scissorLocked.value) ||
+    (radiusMode.value && !radiusLocked.value) ||
+    distanceMode.value
   let point: [number, number] = [e.lngLat.lng, e.lngLat.lat]
   if (toolPlacing && map) {
     const feats = map.queryRenderedFeatures(e.point, {
@@ -328,21 +377,41 @@ function handleMapClick(e: maplibregl.MapMouseEvent) {
     if (snapped) point = snapped.coordinates
   }
 
+  if (distanceMode.value) {
+    // A 3rd tap after both points are set starts a fresh pair — the prior in-progress pair was
+    // never added, so nothing is lost.
+    if (!distancePointA.value || (distancePointA.value && distancePointB.value)) {
+      distancePointA.value = point
+      distancePointB.value = null
+    } else {
+      distancePointB.value = point
+    }
+    updateDistanceMarkers()
+    updateDistanceLine()
+    return
+  }
+
   if (scissorMode.value) {
     // Locked bisect: geometry is frozen, so taps don't move the start point — the rest of the map stays usable.
     if (!scissorLocked.value) {
       scissorStart.value = point
-      resetScissorMarkOff()
+      resetScissorToolIds()
       updateScissorLayers()
     }
     return
   }
   if (!radiusMode.value || radiusLocked.value) return
   radiusCenter.value = point
+  resetRadiusToolIds()
   updateRadiusCircle()
   // Refresh station layers to show golden hue
   ;(map?.getSource('stations') as maplibregl.GeoJSONSource | undefined)?.setData(buildGeoJSON())
   ;(map?.getSource('favorites') as maplibregl.GeoJSONSource | undefined)?.setData(buildFavGeoJSON())
+}
+
+function resetRadiusToolIds() {
+  radiusInsideToolId.value = null
+  radiusOutsideToolId.value = null
 }
 
 function clearRadius() {
@@ -351,19 +420,23 @@ function clearRadius() {
   radiusMode.value = false
   radiusLocked.value = false
   stationsInRadius.value = new Set()
+  resetRadiusToolIds()
   updateRadiusCircle()
   ;(map?.getSource('stations') as maplibregl.GeoJSONSource | undefined)?.setData(buildGeoJSON())
   ;(map?.getSource('favorites') as maplibregl.GeoJSONSource | undefined)?.setData(buildFavGeoJSON())
 }
 
+function radiusDescription(): string {
+  const km =
+    radiusMeters.value >= 1000
+      ? `${(radiusMeters.value / 1000).toFixed(1)}km`
+      : `${radiusMeters.value}m`
+  return `${km} radius`
+}
+
 // Applying a shared/locked radius (Apply) works the same as applying your own — this also
-// auto-unlocks and hands the recipient a fully-editable local copy (see toolHistory + Apply flow).
-function applyRadiusAction(names: string[], reason: string) {
-  if (names.length === 0) return
-  store.crossOffAll(names, reason)
-  if (radiusCenter.value) {
-    store.addToolHistoryEntry('radius', { center: radiusCenter.value, meters: radiusMeters.value })
-  }
+// auto-unlocks and hands the recipient a fully-editable local copy.
+function unlockAfterApply() {
   if (radiusLocked.value) {
     radiusLocked.value = false
     clearRadiusUrlParam()
@@ -371,33 +444,45 @@ function applyRadiusAction(names: string[], reason: string) {
   }
 }
 
-function crossOffInRadius() {
+// Toggles the "inside" application on/off, undoing it by disabling the tool history entry it
+// created rather than deleting station history piecemeal.
+function toggleRadiusInside() {
+  if (radiusInsideToolId.value) {
+    store.toggleTool(radiusInsideToolId.value)
+    return
+  }
   const names = [...stationsInRadius.value].filter((n) => !(n in store.crossedOff))
-  const km =
-    radiusMeters.value >= 1000
-      ? `${(radiusMeters.value / 1000).toFixed(1)}km`
-      : `${radiusMeters.value}m`
-  applyRadiusAction(names, `Inside ${km} radius`)
+  if (names.length === 0) return
+  radiusInsideToolId.value = store.addTool('radius', `Inside ${radiusDescription()}`, names, {
+    reason: `Inside ${radiusDescription()}`,
+    params: { center: radiusCenter.value!, meters: radiusMeters.value },
+  })
+  unlockAfterApply()
 }
 
-function crossOffOutsideRadius() {
+function toggleRadiusOutside() {
+  if (radiusOutsideToolId.value) {
+    store.toggleTool(radiusOutsideToolId.value)
+    return
+  }
   const names = stations
     .filter((s) => !stationsInRadius.value.has(s.name) && !(s.name in store.crossedOff))
     .map((s) => s.name)
-  const km =
-    radiusMeters.value >= 1000
-      ? `${(radiusMeters.value / 1000).toFixed(1)}km`
-      : `${radiusMeters.value}m`
-  applyRadiusAction(names, `Outside ${km} radius`)
+  if (names.length === 0) return
+  radiusOutsideToolId.value = store.addTool('radius', `Outside ${radiusDescription()}`, names, {
+    reason: `Outside ${radiusDescription()}`,
+    params: { center: radiusCenter.value!, meters: radiusMeters.value },
+  })
+  unlockAfterApply()
 }
 
-function shareRadius() {
-  if (!radiusCenter.value) return
+function buildRadiusShareUrl(): string | null {
+  if (!radiusCenter.value) return null
   const [lng, lat] = radiusCenter.value
   const url = new URL(window.location.href)
   url.searchParams.delete('c')
   url.searchParams.set('radius', `${lng.toFixed(6)},${lat.toFixed(6)},${radiusMeters.value}`)
-  navigator.clipboard.writeText(url.toString())
+  return url.toString()
 }
 
 function loadRadiusFromUrl(): boolean {
@@ -423,6 +508,137 @@ function toggleRadiusLock() {
   radiusLocked.value = !radiusLocked.value
   if (!radiusLocked.value) clearRadiusUrlParam()
   updateRadiusCircle()
+}
+
+// Distance tool: place point A then point B, straight-line distance between them. Each finalized
+// pair becomes its own 'distance' tool entry (stations: [] — it never crosses anything off) so
+// several can coexist, all drawn at once, each independently toggleable from history.
+function createDistancePointEl(color: string): HTMLDivElement {
+  const el = document.createElement('div')
+  el.style.cssText = `width:18px;height:18px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:grab;touch-action:none;`
+  return el
+}
+
+function onDistancePointADrag() {
+  if (!distanceMarkerA) return
+  const { lng, lat } = distanceMarkerA.getLngLat()
+  distancePointA.value = [lng, lat]
+  updateDistanceLine()
+}
+
+function onDistancePointBDrag() {
+  if (!distanceMarkerB) return
+  const { lng, lat } = distanceMarkerB.getLngLat()
+  distancePointB.value = [lng, lat]
+  updateDistanceLine()
+}
+
+function updateDistanceMarkers() {
+  if (!map) return
+  if (distancePointA.value) {
+    if (!distanceMarkerA) {
+      distanceMarkerA = new maplibregl.Marker({
+        element: createDistancePointEl('#7c3aed'),
+        draggable: true,
+      })
+        .setLngLat(distancePointA.value)
+        .addTo(map)
+      distanceMarkerA.on('drag', onDistancePointADrag)
+    } else {
+      distanceMarkerA.setLngLat(distancePointA.value)
+    }
+  } else {
+    distanceMarkerA?.remove()
+    distanceMarkerA = null
+  }
+
+  if (distancePointB.value) {
+    if (!distanceMarkerB) {
+      distanceMarkerB = new maplibregl.Marker({
+        element: createDistancePointEl('#a855f7'),
+        draggable: true,
+      })
+        .setLngLat(distancePointB.value)
+        .addTo(map)
+      distanceMarkerB.on('drag', onDistancePointBDrag)
+    } else {
+      distanceMarkerB.setLngLat(distancePointB.value)
+    }
+  } else {
+    distanceMarkerB?.remove()
+    distanceMarkerB = null
+  }
+}
+
+function updateDistanceLine() {
+  const source = map?.getSource('distance-line') as maplibregl.GeoJSONSource | undefined
+  if (!source) return
+  if (!distancePointA.value || !distancePointB.value) {
+    source.setData({ type: 'FeatureCollection', features: [] })
+    return
+  }
+  source.setData({
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [distancePointA.value, distancePointB.value],
+        },
+        properties: {},
+      },
+    ],
+  })
+}
+
+function updateDistanceMarkingsLayer() {
+  const source = map?.getSource('distance-markings') as maplibregl.GeoJSONSource | undefined
+  if (!source) return
+  source.setData({
+    type: 'FeatureCollection',
+    features: distanceMarkings.value.map((m) => ({
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: [m.params.pointA, m.params.pointB],
+      },
+      properties: { id: m.id },
+    })),
+  })
+}
+
+const distancePreviewMeters = computed(() => {
+  if (!distancePointA.value || !distancePointB.value) return null
+  return haversineMeters(distancePointA.value, distancePointB.value)
+})
+
+function formatDistance(meters: number): string {
+  return meters >= 1000 ? `${(meters / 1000).toFixed(2)} km` : `${Math.round(meters)} m`
+}
+
+function addDistanceMarking() {
+  if (!distancePointA.value || !distancePointB.value) return
+  const meters = haversineMeters(distancePointA.value, distancePointB.value)
+  store.addTool('distance', `Distance · ${formatDistance(meters)}`, [], {
+    params: { pointA: distancePointA.value, pointB: distancePointB.value },
+  })
+  distancePointA.value = null
+  distancePointB.value = null
+  updateDistanceMarkers()
+  updateDistanceLine()
+}
+
+function cancelDistancePlacement() {
+  distancePointA.value = null
+  distancePointB.value = null
+  updateDistanceMarkers()
+  updateDistanceLine()
+}
+
+function clearDistanceMode() {
+  distanceMode.value = false
+  cancelDistancePlacement()
 }
 
 // Scissor tool: endpoints[0] = end (hot/red), endpoints[1] = start (cold/blue) — fixed convention
@@ -493,25 +709,86 @@ function createEndpointEl(color: string): HTMLDivElement {
   return el
 }
 
-// The end/hot endpoint marker doubles as the drag handle: dragging it only changes the angle —
-// updateScissorVisuals() always recomputes its position back onto the fixed-radius circle
-// (radius = scissorDistance) around scissorStart, so any drag position just sets a direction.
-function createDraggableEndpointEl(color: string): HTMLDivElement {
+// The standalone drag handle that sets the bisect angle — deliberately not the endpoint marker
+// itself (see HANDLE_OFFSET_PX), so it can be big and grabbable without overlapping the
+// endpoint's own coordinate display.
+function createHandleEl(): HTMLDivElement {
   const el = document.createElement('div')
-  el.style.cssText = `width:22px;height:22px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;cursor:grab;touch-action:none;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);user-select:none;`
+  el.style.cssText =
+    'width:44px;height:44px;border-radius:50%;background:#8b5cf6;display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff;cursor:grab;touch-action:none;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.35);user-select:none;'
   el.textContent = '↻'
   return el
 }
 
-function onEndpointDrag() {
-  if (!scissorStart.value || !scissorEndpointA || !map) return
-  const dragged = scissorEndpointA.getLngLat()
-  const startPx = map.project(scissorStart.value as maplibregl.LngLatLike)
-  const dragPx = map.project(dragged)
-  const dx = dragPx.x - startPx.x
-  const dy = -(dragPx.y - startPx.y) // invert Y for math coords
-  scissorAngle.value = (Math.round((Math.atan2(dy, dx) * 180) / Math.PI) + 360) % 360
-  updateScissorVisuals() // snaps the marker back onto the fixed-radius circle around start
+function createLabelEl(text: string, color: string): HTMLDivElement {
+  const el = document.createElement('div')
+  el.style.cssText = `font-size:18px;font-weight:900;color:${color};text-shadow:0 0 4px #fff,0 0 4px #fff;pointer-events:none;user-select:none;`
+  el.textContent = text
+  return el
+}
+
+// Handle sits on the bisect line itself (perpendicular to the endpoint axis) at a fixed px
+// offset from center, same convention as the pre-overhaul model.
+function getHandleLngLat(): [number, number] | null {
+  if (!scissorCenter.value || !map) return null
+  const centerPx = map.project(scissorCenter.value as maplibregl.LngLatLike)
+  const perpAngleRad = ((scissorAngle.value + 90) * Math.PI) / 180
+  const handlePx: [number, number] = [
+    centerPx.x + HANDLE_OFFSET_PX * Math.cos(perpAngleRad),
+    centerPx.y - HANDLE_OFFSET_PX * Math.sin(perpAngleRad),
+  ]
+  const lngLat = map.unproject(handlePx)
+  return [lngLat.lng, lngLat.lat]
+}
+
+function onScissorHandleDrag() {
+  if (!scissorCenter.value || !scissorHandle || !map) return
+  const centerPx = map.project(scissorCenter.value as maplibregl.LngLatLike)
+  const handlePx = map.project(scissorHandle.getLngLat())
+  const dx = handlePx.x - centerPx.x
+  const dy = -(handlePx.y - centerPx.y) // invert Y for math coords
+  const lineAngle = (Math.atan2(dy, dx) * 180) / Math.PI
+  // The handle sits on the bisect line, which is perpendicular to the endpoint axis.
+  scissorAngle.value = (Math.round(lineAngle - 90) + 360) % 360
+  updateScissorVisuals()
+}
+
+function updateHotColdLabels() {
+  if (!map || !scissorCenter.value || scissorLocked.value) {
+    hotterMarker?.remove()
+    colderMarker?.remove()
+    hotterMarker = null
+    colderMarker = null
+    return
+  }
+  const centerPx = map.project(scissorCenter.value as maplibregl.LngLatLike)
+  const angleRad = (scissorAngle.value * Math.PI) / 180
+  const labelOffset = 120
+  const hotPx: [number, number] = [
+    centerPx.x + labelOffset * Math.cos(angleRad),
+    centerPx.y - labelOffset * Math.sin(angleRad),
+  ]
+  const coldPx: [number, number] = [
+    centerPx.x - labelOffset * Math.cos(angleRad),
+    centerPx.y + labelOffset * Math.sin(angleRad),
+  ]
+  const hotLngLat = map.unproject(hotPx)
+  const coldLngLat = map.unproject(coldPx)
+
+  if (!hotterMarker) {
+    hotterMarker = new maplibregl.Marker({ element: createLabelEl('HOTTER', '#dc2626') })
+      .setLngLat(hotLngLat)
+      .addTo(map)
+  } else {
+    hotterMarker.setLngLat(hotLngLat)
+  }
+  if (!colderMarker) {
+    colderMarker = new maplibregl.Marker({ element: createLabelEl('COLDER', '#2563eb') })
+      .setLngLat(coldLngLat)
+      .addTo(map)
+  } else {
+    colderMarker.setLngLat(coldLngLat)
+  }
 }
 
 function updateScissorMarkers() {
@@ -520,29 +797,48 @@ function updateScissorMarkers() {
   if (!scissorStart.value) {
     scissorEndpointA?.remove()
     scissorEndpointB?.remove()
+    scissorHandle?.remove()
     scissorEndpointA = null
     scissorEndpointB = null
+    scissorHandle = null
     return
   }
 
   // Endpoint indicators. Fixed convention: endpoints[0] = end (hot/red, will be marked off),
   // endpoints[1] = start (cold/blue, stays). Reverse swaps which physical point is which.
+  // Neither is draggable — the standalone handle (below) is what sets the angle.
   const endpoints = getScissorEndpoints()
   if (endpoints) {
     const endColor = '#dc2626'
     const startColor = '#2563eb'
 
     if (!scissorEndpointA) {
-      scissorEndpointA = new maplibregl.Marker({
-        element: createDraggableEndpointEl(endColor),
-        draggable: !scissorLocked.value,
-      })
+      scissorEndpointA = new maplibregl.Marker({ element: createEndpointEl(endColor) })
         .setLngLat(endpoints[0])
         .addTo(map)
-      scissorEndpointA.on('drag', onEndpointDrag)
     } else {
       scissorEndpointA.setLngLat(endpoints[0])
-      scissorEndpointA.setDraggable(!scissorLocked.value)
+    }
+
+    // Standalone drag handle on the bisect line — hidden in locked/shared view.
+    if (!scissorLocked.value) {
+      const handlePos = getHandleLngLat()
+      if (handlePos) {
+        if (!scissorHandle) {
+          scissorHandle = new maplibregl.Marker({
+            element: createHandleEl(),
+            draggable: true,
+          })
+            .setLngLat(handlePos)
+            .addTo(map)
+          scissorHandle.on('drag', onScissorHandleDrag)
+        } else {
+          scissorHandle.setLngLat(handlePos)
+        }
+      }
+    } else {
+      scissorHandle?.remove()
+      scissorHandle = null
     }
 
     if (!scissorEndpointB) {
@@ -610,6 +906,7 @@ function updateScissorMarkers() {
 
   // Update half-plane overlay polygons
   updateSideOverlays()
+  updateHotColdLabels()
 }
 
 function createArrowEl(angleDeg: number): HTMLDivElement {
@@ -731,18 +1028,25 @@ function updateScissorLayers() {
 // Also serves as the "Apply" action for a shared/locked bisect (see toolHistory + Apply flow) —
 // works unchanged whether scissorLocked is true or false since it only reads
 // stationsOnScissorSide/store.crossedOff.
-function markOffScissorSide() {
-  const names = [...stationsOnScissorSide.value].filter((n) => !(n in store.crossedOff))
-  if (names.length === 0) return
-  scissorMarkedOffEventIds.value = store.crossOffAll(names, 'Bisect tool')
-  scissorMarkedOff.value = true
-  if (scissorStart.value) {
-    store.addToolHistoryEntry('bisect', {
-      start: scissorStart.value,
-      angle: scissorAngle.value,
-      distance: scissorDistance.value,
-    })
+function bisectParams(): BisectHistoryParams | null {
+  if (!scissorStart.value) return null
+  return { start: scissorStart.value, angle: scissorAngle.value, distance: scissorDistance.value }
+}
+
+// Toggles marking the hot (red) side off/on, undoing it by disabling the tool history entry it
+// created — "Unmark" never deletes station history piecemeal.
+function toggleMarkHotter() {
+  if (scissorHotToolId.value) {
+    store.toggleTool(scissorHotToolId.value)
+    return
   }
+  const names = scissorHotStations.value
+  const params = bisectParams()
+  if (names.length === 0 || !params) return
+  scissorHotToolId.value = store.addTool('bisect', 'Bisect · hotter side', names, {
+    reason: 'Bisect · hotter side',
+    params,
+  })
   if (scissorLocked.value) {
     scissorLocked.value = false
     clearBisectUrlParam()
@@ -750,15 +1054,28 @@ function markOffScissorSide() {
   }
 }
 
-function unmarkScissorSide() {
-  for (const id of scissorMarkedOffEventIds.value) store.removeStationEvent(id)
-  scissorMarkedOffEventIds.value = []
-  scissorMarkedOff.value = false
+function toggleMarkColder() {
+  if (scissorColdToolId.value) {
+    store.toggleTool(scissorColdToolId.value)
+    return
+  }
+  const names = scissorColdStations.value
+  const params = bisectParams()
+  if (names.length === 0 || !params) return
+  scissorColdToolId.value = store.addTool('bisect', 'Bisect · colder side', names, {
+    reason: 'Bisect · colder side',
+    params,
+  })
+  if (scissorLocked.value) {
+    scissorLocked.value = false
+    clearBisectUrlParam()
+    updateScissorVisuals()
+  }
 }
 
-function resetScissorMarkOff() {
-  scissorMarkedOff.value = false
-  scissorMarkedOffEventIds.value = []
+function resetScissorToolIds() {
+  scissorHotToolId.value = null
+  scissorColdToolId.value = null
 }
 
 const SCISSOR_STORAGE_KEY = 'hide-and-seek-bisect'
@@ -826,8 +1143,8 @@ function getDefaultBisectStart(): [number, number] {
   return [base[0] + offsetLng, base[1]]
 }
 
-function shareBisect() {
-  if (!scissorStart.value) return
+function buildBisectShareUrl(): string | null {
+  if (!scissorStart.value) return null
   const [lng, lat] = scissorStart.value
   const url = new URL(window.location.href)
   url.searchParams.delete('c') // don't share crossed-off state
@@ -835,7 +1152,7 @@ function shareBisect() {
     'bisect',
     `${lng.toFixed(6)},${lat.toFixed(6)},${scissorAngle.value},${scissorDistance.value}`,
   )
-  navigator.clipboard.writeText(url.toString())
+  return url.toString()
 }
 
 // Remove the ?bisect= param so a shared/locked view isn't reasserted after unlocking or cancelling.
@@ -847,13 +1164,45 @@ function clearBisectUrlParam() {
   }
 }
 
-// Copy one endpoint's coordinate (lat,lng) to the clipboard. Fixed convention:
-// end = endpoints[0] (hot), start = endpoints[1] (cold).
-function copyScissorEndpoint(which: 'start' | 'end') {
-  const endpoints = getScissorEndpoints()
-  if (!endpoints) return
-  const [lng, lat] = which === 'end' ? endpoints[0] : endpoints[1]
+interface ShareModalPoint {
+  label: string
+  color: string
+  coords: [number, number]
+}
+
+const shareModalPoints = computed<ShareModalPoint[]>(() => {
+  if (shareModalKind.value === 'bisect') {
+    const endpoints = getScissorEndpoints()
+    if (!endpoints) return []
+    return [
+      { label: 'Start (colder)', color: '#2563eb', coords: endpoints[1] },
+      { label: 'End (hotter)', color: '#dc2626', coords: endpoints[0] },
+    ]
+  }
+  if (shareModalKind.value === 'radius') {
+    if (!radiusCenter.value) return []
+    return [{ label: 'Center', color: '#f59e0b', coords: radiusCenter.value }]
+  }
+  return []
+})
+
+function shareModalUrl(): string | null {
+  if (shareModalKind.value === 'bisect') return buildBisectShareUrl()
+  if (shareModalKind.value === 'radius') return buildRadiusShareUrl()
+  return null
+}
+
+function copyShareModalUrl() {
+  const url = shareModalUrl()
+  if (!url) return
+  navigator.clipboard.writeText(url)
+  showToast('Share link copied', 'success')
+}
+
+function copySharePointCoords(point: ShareModalPoint) {
+  const [lng, lat] = point.coords
   navigator.clipboard.writeText(`${lat.toFixed(6)},${lng.toFixed(6)}`)
+  showToast('Coordinates copied', 'success')
 }
 
 // Swaps which physical point is start vs end: newStart = oldEnd, newAngle = angle + 180.
@@ -902,16 +1251,22 @@ function clearScissor() {
   clearBisectUrlParam()
   scissorEndpointA?.remove()
   scissorEndpointB?.remove()
+  scissorHandle?.remove()
   arrowHeadA?.remove()
   arrowHeadB?.remove()
+  hotterMarker?.remove()
+  colderMarker?.remove()
   scissorEndpointA = null
   scissorEndpointB = null
+  scissorHandle = null
   arrowHeadA = null
   arrowHeadB = null
+  hotterMarker = null
+  colderMarker = null
   scissorMode.value = false
   scissorLocked.value = false
   stationsOnScissorSide.value = new Set()
-  resetScissorMarkOff()
+  resetScissorToolIds()
   if (!map) return
   const lineSource = map.getSource('scissor-line') as maplibregl.GeoJSONSource | undefined
   if (lineSource) lineSource.setData({ type: 'FeatureCollection', features: [] })
@@ -927,7 +1282,7 @@ function clearScissor() {
 
 // Reload a past bisect/radius/endgame configuration onto the map, fully editable — this is also
 // how a shared link's recipient can end up with the exact same tool history entry locally.
-function loadToolHistoryEntry(entry: ToolHistoryEntry) {
+function loadToolHistoryEntry(entry: ToolEntry) {
   if (entry.type === 'bisect') {
     const params = entry.params as BisectHistoryParams
     // Route through the same localStorage key the tool already restores from on open, so a
@@ -941,7 +1296,7 @@ function loadToolHistoryEntry(entry: ToolHistoryEntry) {
       scissorStart.value = params.start
       scissorAngle.value = params.angle
       scissorDistance.value = params.distance
-      resetScissorMarkOff()
+      resetScissorToolIds()
       updateScissorVisuals()
     } else {
       scissorMode.value = true
@@ -952,12 +1307,13 @@ function loadToolHistoryEntry(entry: ToolHistoryEntry) {
     radiusCenter.value = params.center
     radiusMeters.value = params.meters
     radiusMode.value = true
+    resetRadiusToolIds()
     updateRadiusCircle()
     ;(map?.getSource('stations') as maplibregl.GeoJSONSource | undefined)?.setData(buildGeoJSON())
     ;(map?.getSource('favorites') as maplibregl.GeoJSONSource | undefined)?.setData(
       buildFavGeoJSON(),
     )
-  } else {
+  } else if (entry.type === 'endgame') {
     const params = entry.params as EndgameHistoryParams
     const url = new URL(window.location.href)
     url.searchParams.set('endgame', params.station)
@@ -977,23 +1333,10 @@ function loadToolHistoryEntry(entry: ToolHistoryEntry) {
     }
     history.replaceState(null, '', url)
     store.setTab('endgame')
+  } else {
+    return
   }
   showHistory.value = false
-}
-
-function toolHistorySummary(entry: ToolHistoryEntry): string {
-  if (entry.type === 'bisect') {
-    const p = entry.params as BisectHistoryParams
-    const dist = p.distance >= 1000 ? `${(p.distance / 1000).toFixed(1)} km` : `${p.distance} m`
-    return `Bisect · ${dist} apart`
-  }
-  if (entry.type === 'radius') {
-    const p = entry.params as RadiusHistoryParams
-    const dist = p.meters >= 1000 ? `${(p.meters / 1000).toFixed(1)} km` : `${p.meters} m`
-    return `Radius · ${dist}`
-  }
-  const p = entry.params as EndgameHistoryParams
-  return `Endgame · ${p.station}`
 }
 
 function buildGeoJSON(): GeoJSON.FeatureCollection {
@@ -1478,13 +1821,48 @@ onMounted(() => {
       'stations-layer',
     )
 
+    // Distance tool: all finalized markings, plus the in-progress pair being placed — both
+    // rendered as purple dashed lines so several can be compared on the map at once.
+    map.addSource('distance-markings', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    })
+    map.addLayer({
+      id: 'distance-markings-layer',
+      type: 'line',
+      source: 'distance-markings',
+      paint: {
+        'line-color': '#7c3aed',
+        'line-width': 3,
+        'line-dasharray': [4, 3],
+        'line-opacity': 0.85,
+      },
+    })
+    map.addSource('distance-line', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    })
+    map.addLayer({
+      id: 'distance-line-layer',
+      type: 'line',
+      source: 'distance-line',
+      paint: {
+        'line-color': '#a855f7',
+        'line-width': 3,
+        'line-dasharray': [4, 3],
+        'line-opacity': 0.85,
+      },
+    })
+    updateDistanceMarkingsLayer()
+
     for (const layer of ['stations-layer', 'favorites-layer']) {
       map.on('click', layer, (e) => {
         // While a tool is actively placing, station taps snap the tool's point instead of
         // opening the popup — see handleMapClick.
         if (
           (scissorMode.value && !scissorLocked.value) ||
-          (radiusMode.value && !radiusLocked.value)
+          (radiusMode.value && !radiusLocked.value) ||
+          distanceMode.value
         )
           return
         const name = e.features?.[0]?.properties?.name
@@ -1519,9 +1897,14 @@ onUnmounted(() => {
   popup?.remove()
   scissorEndpointA?.remove()
   scissorEndpointB?.remove()
+  scissorHandle?.remove()
   arrowHeadA?.remove()
   arrowHeadB?.remove()
+  hotterMarker?.remove()
+  colderMarker?.remove()
   radiusCenterMarker?.remove()
+  distanceMarkerA?.remove()
+  distanceMarkerB?.remove()
   gpsMarker?.remove()
   map?.remove()
   map = null
@@ -1559,6 +1942,7 @@ watch(radiusMode, (active) => {
 
 watch(radiusMeters, () => {
   if (!radiusCenter.value) return
+  resetRadiusToolIds()
   updateRadiusCircle()
   ;(map?.getSource('stations') as maplibregl.GeoJSONSource | undefined)?.setData(buildGeoJSON())
   ;(map?.getSource('favorites') as maplibregl.GeoJSONSource | undefined)?.setData(buildFavGeoJSON())
@@ -1571,11 +1955,11 @@ watch([scissorAngle, scissorDistance], () => {
 
 // Distance only ever changes via the <select> (never via reverse/GPS-snap), so this is
 // an unambiguous "the user picked a different distance" — a fresh bisect instance.
-watch(scissorDistance, resetScissorMarkOff)
+watch(scissorDistance, resetScissorToolIds)
 
 watch(scissorMode, (active) => {
   if (active) {
-    resetScissorMarkOff()
+    resetScissorToolIds()
     // Priority: URL param > localStorage > GPS-based default
     if (!loadBisectFromUrl() && !loadSavedBisect()) {
       scissorStart.value = getDefaultBisectStart()
@@ -1586,6 +1970,13 @@ watch(scissorMode, (active) => {
     updateScissorVisuals()
   }
 })
+
+watch(distanceMode, (active) => {
+  if (!active) cancelDistancePlacement()
+})
+
+// Any tool toggle/removal in history can add, hide, or drop a distance marking.
+watch(() => store.tools.map((t) => `${t.id}:${t.enabled}`).join(','), updateDistanceMarkingsLayer)
 
 watch(showLocations, (visible) => {
   if (!map) return
@@ -1653,6 +2044,12 @@ watch(userPosition, () => {
           ✂️ Bisect
         </button>
         <button
+          :class="['menu-item', { active: distanceMode }]"
+          @click="(distanceMode ? clearDistanceMode() : (distanceMode = true), (menuOpen = false))"
+        >
+          📏 Distance
+        </button>
+        <button
           :class="['menu-item', { active: showHistory }]"
           @click="((showHistory = !showHistory), (menuOpen = false))"
         >
@@ -1684,6 +2081,14 @@ watch(userPosition, () => {
       </label>
     </div>
 
+    <div v-if="distanceMarkings.length > 0" class="distance-stack">
+      <div v-for="m in distanceMarkings" :key="m.id" class="distance-stack-row">
+        <span class="distance-swatch"></span>
+        <span class="distance-stack-label">{{ m.description }}</span>
+        <button class="distance-stack-remove" @click="store.toggleTool(m.id)">✕</button>
+      </div>
+    </div>
+
     <div v-if="radiusMode" class="radius-panel">
       <div class="radius-label">
         {{ radiusMeters >= 1000 ? `${(radiusMeters / 1000).toFixed(1)} km` : `${radiusMeters} m` }}
@@ -1710,16 +2115,28 @@ watch(userPosition, () => {
       </div>
       <div v-if="radiusCenter" class="radius-actions">
         <button class="radius-action-btn radius-clear-btn" @click="clearRadius">Clear</button>
-        <button class="radius-action-btn" @click="toggleRadiusLock">
+        <button class="radius-action-btn radius-lock-btn" @click="toggleRadiusLock">
           {{ radiusLocked ? '🔓 Unlock to edit' : '🔒 Lock' }}
         </button>
-        <button class="radius-action-btn" @click="shareRadius">🔗 Share</button>
-        <template v-if="stationsInRadius.size > 0">
-          <button class="radius-action-btn" @click="crossOffInRadius">
-            {{ radiusLocked ? 'Apply inside' : 'Inside' }} ({{ radiusInsideCount }})
+        <button class="radius-action-btn radius-share-btn" @click="shareModalKind = 'radius'">
+          🔗 Share
+        </button>
+        <template v-if="stationsInRadius.size > 0 || radiusInsideMarked">
+          <button class="radius-action-btn radius-inside-btn" @click="toggleRadiusInside">
+            {{
+              radiusInsideMarked
+                ? 'Undo inside'
+                : `${radiusLocked ? 'Apply' : 'Mark'} inside (${radiusInsideCount})`
+            }}
           </button>
-          <button class="radius-action-btn" @click="crossOffOutsideRadius">
-            {{ radiusLocked ? 'Apply outside' : 'Outside' }} ({{ radiusOutsideCount }})
+        </template>
+        <template v-if="radiusOutsideCount > 0 || radiusOutsideMarked">
+          <button class="radius-action-btn radius-outside-btn" @click="toggleRadiusOutside">
+            {{
+              radiusOutsideMarked
+                ? 'Undo outside'
+                : `${radiusLocked ? 'Apply' : 'Mark'} outside (${radiusOutsideCount})`
+            }}
           </button>
         </template>
       </div>
@@ -1736,7 +2153,7 @@ watch(userPosition, () => {
               ? `${(scissorDistance / 1000).toFixed(1)} km`
               : `${scissorDistance} m`
           }}
-          apart · {{ scissorMarkOffCount }} remaining
+          apart
         </span>
       </div>
       <div v-if="!scissorLocked" class="scissor-controls">
@@ -1750,7 +2167,7 @@ watch(userPosition, () => {
         </label>
       </div>
       <div v-if="!scissorLocked" class="scissor-hint">
-        {{ scissorCenter ? 'Drag the red endpoint to set angle' : 'Tap map to place start point' }}
+        {{ scissorCenter ? 'Drag the purple handle to set angle' : 'Tap map to place start point' }}
       </div>
       <div v-if="scissorCenter" class="scissor-actions">
         <button class="scissor-cancel-btn" @click="clearScissor">Cancel</button>
@@ -1760,26 +2177,85 @@ watch(userPosition, () => {
         <button v-if="!scissorLocked" class="scissor-flip-btn" @click="reverseEndpoints">
           ⟳ Reverse
         </button>
-        <button class="scissor-copy-btn" @click="copyScissorEndpoint('start')">
-          📋 Copy start
-        </button>
-        <button class="scissor-copy-btn" @click="copyScissorEndpoint('end')">📋 Copy end</button>
-        <button class="scissor-share-btn" @click="shareBisect">🔗 Share</button>
+        <button class="scissor-share-btn" @click="shareModalKind = 'bisect'">🔗 Share</button>
         <button
-          v-if="scissorMarkOffCount > 0 || scissorMarkedOff"
-          class="scissor-markoff-btn"
-          @click="scissorMarkedOff ? unmarkScissorSide() : markOffScissorSide()"
+          v-if="scissorHotStations.length > 0 || scissorHotMarked"
+          class="scissor-markoff-btn scissor-hot-btn"
+          @click="toggleMarkHotter"
         >
           {{
-            scissorMarkedOff
-              ? 'Unmark'
+            scissorHotMarked
+              ? 'Unmark hotter'
               : scissorLocked
-                ? `Apply (${scissorMarkOffCount})`
-                : `Mark off ${scissorMarkOffCount}`
+                ? `Apply hotter (${scissorHotStations.length})`
+                : `Mark hotter (${scissorHotStations.length})`
+          }}
+        </button>
+        <button
+          v-if="scissorColdStations.length > 0 || scissorColdMarked"
+          class="scissor-markoff-btn scissor-cold-btn"
+          @click="toggleMarkColder"
+        >
+          {{
+            scissorColdMarked
+              ? 'Unmark colder'
+              : scissorLocked
+                ? `Apply colder (${scissorColdStations.length})`
+                : `Mark colder (${scissorColdStations.length})`
           }}
         </button>
       </div>
     </div>
+
+    <div v-if="distanceMode" class="distance-panel">
+      <div class="distance-label">📏 Distance Tool</div>
+      <div v-if="distancePreviewMeters !== null" class="distance-preview">
+        {{ formatDistance(distancePreviewMeters) }}
+      </div>
+      <div class="distance-hint">
+        {{
+          !distancePointA
+            ? 'Tap map to place point A'
+            : !distancePointB
+              ? 'Tap map to place point B'
+              : 'Drag either point to adjust, or Add to save it'
+        }}
+      </div>
+      <div class="distance-actions">
+        <button class="distance-action-btn distance-cancel-btn" @click="cancelDistancePlacement">
+          Cancel
+        </button>
+        <button
+          v-if="distancePointA && distancePointB"
+          class="distance-action-btn distance-add-btn"
+          @click="addDistanceMarking"
+        >
+          + Add
+        </button>
+      </div>
+    </div>
+
+    <Teleport to="body">
+      <div v-if="shareModalKind" class="overlay" @click.self="shareModalKind = null">
+        <div class="modal share-modal">
+          <p class="modal-text">Share {{ shareModalKind === 'bisect' ? 'bisect' : 'radius' }}</p>
+          <div v-for="point in shareModalPoints" :key="point.label" class="share-point-row">
+            <span class="share-point-swatch" :style="{ background: point.color }"></span>
+            <span class="share-point-label">{{ point.label }}</span>
+            <span class="share-point-coords">
+              {{ point.coords[1].toFixed(6) }}, {{ point.coords[0].toFixed(6) }}
+            </span>
+            <button class="share-point-copy" @click="copySharePointCoords(point)">📋</button>
+          </div>
+          <div class="modal-buttons">
+            <button class="modal-btn cancel-btn" @click="shareModalKind = null">Close</button>
+            <button class="modal-btn confirm-btn" @click="copyShareModalUrl">
+              🔗 Copy share URL
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <Teleport to="body">
       <div v-if="showHistory" class="overlay" @click.self="showHistory = false">
@@ -1788,50 +2264,28 @@ watch(userPosition, () => {
             <span class="history-title">📜 History</span>
             <button class="history-close" @click="showHistory = false">✕</button>
           </div>
-          <div class="history-tabs">
-            <button
-              :class="['history-tab-btn', { active: historyTab === 'stations' }]"
-              @click="historyTab = 'stations'"
-            >
-              Stations
-            </button>
-            <button
-              :class="['history-tab-btn', { active: historyTab === 'tools' }]"
-              @click="historyTab = 'tools'"
-            >
-              Tools
-            </button>
-          </div>
-          <div v-if="historyTab === 'stations'" class="history-list">
-            <div
-              v-for="event in [...store.stationHistory].reverse()"
-              :key="event.id"
-              class="history-event"
-            >
+          <div class="history-list">
+            <div v-for="entry in store.tools" :key="entry.id" class="history-event">
               <div class="history-event-main">
-                <span :class="['history-type', event.type]">
-                  {{ event.type === 'cross-off' ? '✗' : '✓' }}
-                </span>
-                <span class="history-name">{{ event.name }}</span>
-                <button class="history-undo" @click="store.removeStationEvent(event.id)">↩</button>
-              </div>
-              <div v-if="event.reason" class="history-reason">{{ event.reason }}</div>
-            </div>
-            <div v-if="store.stationHistory.length === 0" class="history-empty">No history yet</div>
-          </div>
-          <div v-else class="history-list">
-            <div v-for="entry in store.toolHistory" :key="entry.id" class="history-event">
-              <div class="history-event-main">
-                <span class="history-name">{{ toolHistorySummary(entry) }}</span>
-                <button class="history-undo" @click="loadToolHistoryEntry(entry)">Load</button>
-                <button class="history-undo" @click="store.removeToolHistoryEntry(entry.id)">
-                  ✕
+                <label class="history-checkbox-label">
+                  <input
+                    type="checkbox"
+                    :checked="entry.enabled"
+                    @change="store.toggleTool(entry.id)"
+                  />
+                </label>
+                <span class="history-name">{{ entry.description }}</span>
+                <button
+                  v-if="['bisect', 'radius', 'endgame'].includes(entry.type)"
+                  class="history-undo"
+                  @click="loadToolHistoryEntry(entry)"
+                >
+                  Load
                 </button>
+                <button class="history-undo" @click="store.removeTool(entry.id)">✕</button>
               </div>
             </div>
-            <div v-if="store.toolHistory.length === 0" class="history-empty">
-              No tool history yet
-            </div>
+            <div v-if="store.tools.length === 0" class="history-empty">No history yet</div>
           </div>
         </div>
       </div>
@@ -2035,6 +2489,182 @@ watch(userPosition, () => {
   color: #333;
 }
 
+.radius-lock-btn {
+  background: #fffbeb;
+  border: 1px solid #d97706;
+  color: #b45309;
+}
+
+.radius-share-btn {
+  background: #eff6ff;
+  border: 1px solid #0066cc;
+  color: #0066cc;
+}
+
+.radius-inside-btn {
+  background: #22c55e;
+}
+
+.radius-outside-btn {
+  background: #f59e0b;
+}
+
+.distance-stack {
+  position: absolute;
+  top: 12px;
+  left: 50px;
+  right: 60px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.distance-stack-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 6px 10px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+}
+
+.distance-swatch {
+  width: 14px;
+  height: 3px;
+  background: repeating-linear-gradient(
+    to right,
+    #7c3aed 0,
+    #7c3aed 4px,
+    transparent 4px,
+    transparent 7px
+  );
+  flex-shrink: 0;
+}
+
+.distance-stack-label {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.distance-stack-remove {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.distance-panel {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  background: #fff;
+  border-radius: 10px;
+  padding: 10px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+.distance-label {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.distance-preview {
+  font-size: 20px;
+  font-weight: 700;
+  color: #7c3aed;
+  text-align: center;
+  margin: 4px 0;
+}
+
+.distance-hint {
+  font-size: 12px;
+  color: #888;
+  text-align: center;
+}
+
+.distance-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.distance-action-btn {
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.distance-cancel-btn {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.distance-add-btn {
+  background: #7c3aed;
+  color: #fff;
+}
+
+.share-modal {
+  text-align: left;
+}
+
+.share-point-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 13px;
+}
+
+.share-point-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.share-point-label {
+  flex-shrink: 0;
+  color: #666;
+  min-width: 90px;
+}
+
+.share-point-coords {
+  flex: 1;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.share-point-copy {
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.history-checkbox-label input {
+  width: 18px;
+  height: 18px;
+  accent-color: #0066cc;
+  cursor: pointer;
+}
+
 .scissor-panel {
   position: absolute;
   top: 12px;
@@ -2073,28 +2703,6 @@ watch(userPosition, () => {
   font-weight: 600;
 }
 
-.history-tabs {
-  display: flex;
-  border-bottom: 1px solid #e0e0e0;
-  flex-shrink: 0;
-}
-
-.history-tab-btn {
-  flex: 1;
-  padding: 8px;
-  border: none;
-  background: none;
-  color: #999;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.history-tab-btn.active {
-  color: #0066cc;
-  box-shadow: inset 0 -2px 0 #0066cc;
-}
-
 .history-close {
   background: none;
   border: none;
@@ -2124,31 +2732,10 @@ watch(userPosition, () => {
   gap: 8px;
 }
 
-.history-type {
-  font-size: 15px;
-  flex-shrink: 0;
-}
-
-.history-type.cross-off {
-  color: #dc2626;
-}
-
-.history-type.restore {
-  color: #16a34a;
-}
-
 .history-name {
   flex: 1;
   min-width: 0;
   font-weight: 500;
-}
-
-.history-reason {
-  font-size: 12px;
-  color: #888;
-  padding-left: 23px;
-  white-space: normal;
-  word-break: break-word;
 }
 
 .history-undo {
@@ -2219,17 +2806,6 @@ watch(userPosition, () => {
   margin-top: 8px;
 }
 
-.scissor-copy-btn {
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  border: 1px solid #0d9488;
-  border-radius: 6px;
-  background: #f0fdfa;
-  color: #0f766e;
-  cursor: pointer;
-}
-
 .scissor-cancel-btn {
   padding: 6px 12px;
   font-size: 12px;
@@ -2266,12 +2842,19 @@ watch(userPosition, () => {
 .scissor-markoff-btn {
   padding: 6px 10px;
   font-size: 11px;
-  font-weight: 500;
-  border: 1px solid #dc2626;
+  font-weight: 600;
+  border: none;
   border-radius: 6px;
-  background: #fff;
-  color: #dc2626;
   cursor: pointer;
+  color: #fff;
+}
+
+.scissor-hot-btn {
+  background: #dc2626;
+}
+
+.scissor-cold-btn {
+  background: #2563eb;
 }
 
 .scissor-lock-btn {

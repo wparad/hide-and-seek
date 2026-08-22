@@ -1,25 +1,9 @@
 import { reactive, computed } from 'vue'
-import { stations, type Station } from './stations'
+import { stations } from './stations'
 
 export type TabId = 'map' | 'stations' | 'reachability' | 'endgame' | 'rules' | 'settings'
 
-export interface GameAction {
-  id: string
-  type: 'line' | 'character'
-  mode: 'include' | 'exclude'
-  value: string
-  description: string
-  enabled: boolean
-  createdAt: number
-}
-
-export interface StationEvent {
-  id: string
-  name: string
-  type: 'cross-off' | 'restore'
-  reason?: string
-  createdAt: number
-}
+export type ToolType = 'manual' | 'bisect' | 'radius' | 'endgame' | 'distance'
 
 export interface MapLayerVisibility {
   roads: boolean
@@ -54,11 +38,30 @@ export interface EndgameHistoryParams {
   zones: ToolHistoryZone[]
 }
 
-export interface ToolHistoryEntry {
+export interface DistanceHistoryParams {
+  pointA: [number, number]
+  pointB: [number, number]
+}
+
+export type ToolParams =
+  | BisectHistoryParams
+  | RadiusHistoryParams
+  | EndgameHistoryParams
+  | DistanceHistoryParams
+
+// A single unified history entry. Every tool — including a plain manual mark-off — stores the
+// exact station list it produces rather than mutating a shared crossed-off set directly; the
+// crossed-off set is a pure computed union of every *enabled* entry's stations. Disabling an
+// entry (rather than deleting it) is the normal way to "undo" a tool's application.
+export interface ToolEntry {
   id: string
-  type: 'bisect' | 'radius' | 'endgame'
+  type: ToolType
+  enabled: boolean
   createdAt: number
-  params: BisectHistoryParams | RadiusHistoryParams | EndgameHistoryParams
+  description: string
+  stations: string[]
+  reason?: string
+  params?: ToolParams
 }
 
 export interface ReachableInfo {
@@ -76,7 +79,7 @@ export interface ReachabilityState {
   log: string[]
 }
 
-const STATE_VERSION = 2
+const STATE_VERSION = 3
 
 const DEFAULT_MAP_LAYERS: MapLayerVisibility = {
   roads: false,
@@ -89,14 +92,11 @@ const DEFAULT_MAP_LAYERS: MapLayerVisibility = {
 }
 
 interface GameState {
-  actions: GameAction[]
+  tools: ToolEntry[]
   activeTab: TabId
-  crossedOff: Record<string, string>
   favorites: string[]
   lineOverrides: Record<string, string[]>
   hideNoLineData: boolean
-  stationHistory: StationEvent[]
-  toolHistory: ToolHistoryEntry[]
   mapLayers: MapLayerVisibility
   showStationLabels: boolean
   flexibleHidingZone: boolean
@@ -135,6 +135,33 @@ function syncUrl(crossedOff: Record<string, string>) {
   history.replaceState(null, '', url)
 }
 
+function freshState(fromUrl: string[] | null): GameState {
+  const tools: ToolEntry[] = fromUrl
+    ? [
+        {
+          id: crypto.randomUUID(),
+          type: 'manual',
+          enabled: true,
+          createdAt: Date.now(),
+          description: 'Imported from URL',
+          stations: fromUrl,
+          reason: 'Imported from URL',
+        },
+      ]
+    : []
+  return {
+    tools,
+    activeTab: 'stations',
+    favorites: [],
+    lineOverrides: {},
+    hideNoLineData: true,
+    mapLayers: { ...DEFAULT_MAP_LAYERS },
+    showStationLabels: true,
+    flexibleHidingZone: false,
+    questionCounts: {},
+  }
+}
+
 function loadState(): GameState {
   const fromUrl = crossedOffFromUrl()
   try {
@@ -145,23 +172,30 @@ function loadState(): GameState {
         localStorage.removeItem(STORAGE_KEY)
         return freshState(fromUrl)
       }
-      const crossedOff = fromUrl
-        ? Object.fromEntries(fromUrl.map((n) => [n, 'Imported from URL']))
-        : (parsed.crossedOff ?? {})
       // Drop legacy border-visibility toggles — borders are now always drawn.
       const rawMapLayers = { ...(parsed.mapLayers ?? {}) }
       delete rawMapLayers.boundaries
       delete rawMapLayers.bordersInternational
       delete rawMapLayers.bordersCantonal
+      const tools: ToolEntry[] = fromUrl
+        ? [
+            {
+              id: crypto.randomUUID(),
+              type: 'manual',
+              enabled: true,
+              createdAt: Date.now(),
+              description: 'Imported from URL',
+              stations: fromUrl,
+              reason: 'Imported from URL',
+            },
+          ]
+        : (parsed.tools ?? [])
       return {
-        actions: parsed.actions ?? [],
+        tools,
         activeTab: parsed.activeTab ?? 'stations',
-        crossedOff,
         favorites: parsed.favorites ?? [],
         lineOverrides: parsed.lineOverrides ?? {},
         hideNoLineData: parsed.hideNoLineData ?? true,
-        stationHistory: parsed.stationHistory ?? [],
-        toolHistory: parsed.toolHistory ?? [],
         mapLayers: { ...DEFAULT_MAP_LAYERS, ...rawMapLayers },
         showStationLabels: parsed.showStationLabels ?? true,
         flexibleHidingZone: parsed.flexibleHidingZone ?? false,
@@ -174,37 +208,16 @@ function loadState(): GameState {
   return freshState(fromUrl)
 }
 
-function freshState(fromUrl: string[] | null): GameState {
-  const crossedOff = fromUrl ? Object.fromEntries(fromUrl.map((n) => [n, 'Imported from URL'])) : {}
-  return {
-    actions: [],
-    activeTab: 'stations',
-    crossedOff,
-    favorites: [],
-    lineOverrides: {},
-    hideNoLineData: true,
-    stationHistory: [],
-    toolHistory: [],
-    mapLayers: { ...DEFAULT_MAP_LAYERS },
-    showStationLabels: true,
-    flexibleHidingZone: false,
-    questionCounts: {},
-  }
-}
-
 function saveState(state: GameState) {
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
       version: STATE_VERSION,
-      actions: state.actions,
+      tools: state.tools,
       activeTab: state.activeTab,
-      crossedOff: state.crossedOff,
       favorites: state.favorites,
       lineOverrides: state.lineOverrides,
       hideNoLineData: state.hideNoLineData,
-      stationHistory: state.stationHistory,
-      toolHistory: state.toolHistory,
       mapLayers: state.mapLayers,
       showStationLabels: state.showStationLabels,
       flexibleHidingZone: state.flexibleHidingZone,
@@ -213,27 +226,14 @@ function saveState(state: GameState) {
   )
 }
 
-function applyActions(
-  allStations: Station[],
-  actions: GameAction[],
-  lineOverrides: Record<string, string[]>,
-): Station[] {
-  let result = allStations
-  for (const action of actions) {
-    if (!action.enabled) continue
-    if (action.type === 'line') {
-      if (action.mode === 'exclude') {
-        result = result.filter((s) => !(lineOverrides[s.name] ?? s.lines).includes(action.value))
-      } else {
-        result = result.filter((s) => (lineOverrides[s.name] ?? s.lines).includes(action.value))
-      }
-    } else if (action.type === 'character') {
-      const lower = action.value.toLowerCase()
-      if (action.mode === 'exclude') {
-        result = result.filter((s) => !s.name.toLowerCase().includes(lower))
-      } else {
-        result = result.filter((s) => s.name.toLowerCase().includes(lower))
-      }
+// The only place the crossed-off set is computed: a union of every enabled tool's station list.
+// Later entries win on the displayed reason for a station crossed off by more than one tool.
+function computeCrossedOff(tools: ToolEntry[]): Record<string, string> {
+  const result: Record<string, string> = {}
+  for (const tool of tools) {
+    if (!tool.enabled) continue
+    for (const name of tool.stations) {
+      result[name] = tool.reason ?? tool.description
     }
   }
   return result
@@ -257,123 +257,84 @@ function createStore() {
     log: [],
   })
 
-  const filteredStations = computed(() =>
-    applyActions(stations, state.actions, state.lineOverrides),
-  )
+  const crossedOff = computed(() => computeCrossedOff(state.tools))
+  // No filter tools exist yet (line/character filters were dead code and were removed) — kept as
+  // a plain alias so existing "N / total stations" displays keep working.
+  const filteredStations = computed(() => stations)
   const totalStations = stations.length
 
   function persist() {
     saveState(state)
-    syncUrl(state.crossedOff)
+    syncUrl(crossedOff.value)
   }
 
-  function addAction(action: Omit<GameAction, 'id' | 'enabled' | 'createdAt'>) {
-    state.actions.push({
-      ...action,
-      id: crypto.randomUUID(),
-      enabled: true,
-      createdAt: Date.now(),
-    })
-    persist()
-  }
-
-  function toggleAction(id: string) {
-    const action = state.actions.find((a) => a.id === id)
-    if (action) {
-      action.enabled = !action.enabled
-      persist()
-    }
-  }
-
-  function removeAction(id: string) {
-    const idx = state.actions.findIndex((a) => a.id === id)
-    if (idx !== -1) {
-      state.actions.splice(idx, 1)
-      persist()
-    }
-  }
-
-  function toggleStation(name: string, reason?: string) {
-    const isCrossedOff = name in state.crossedOff
-    if (isCrossedOff) {
-      delete state.crossedOff[name]
-      state.stationHistory.push({
-        id: crypto.randomUUID(),
-        name,
-        type: 'restore',
-        createdAt: Date.now(),
-      })
-    } else {
-      const r = reason ?? 'No reason given'
-      state.crossedOff[name] = r
-      state.stationHistory.push({
-        id: crypto.randomUUID(),
-        name,
-        type: 'cross-off',
-        reason: r,
-        createdAt: Date.now(),
-      })
-    }
-    persist()
-  }
-
-  function crossOffAll(names: string[], reason: string): string[] {
-    const now = Date.now()
-    const ids: string[] = []
-    for (const name of names) {
-      if (name in state.crossedOff) continue
-      state.crossedOff[name] = reason
-      const id = crypto.randomUUID()
-      ids.push(id)
-      state.stationHistory.push({
-        id,
-        name,
-        type: 'cross-off',
-        reason,
-        createdAt: now,
-      })
-    }
-    persist()
-    return ids
-  }
-
-  function restoreAll() {
-    const now = Date.now()
-    for (const name of Object.keys(state.crossedOff)) {
-      state.stationHistory.push({ id: crypto.randomUUID(), name, type: 'restore', createdAt: now })
-    }
-    state.crossedOff = {}
-    persist()
-  }
-
-  function removeStationEvent(id: string) {
-    const idx = state.stationHistory.findIndex((e) => e.id === id)
-    if (idx !== -1) {
-      const event = state.stationHistory[idx]
-      state.stationHistory.splice(idx, 1)
-      if (event.type === 'cross-off' && event.name in state.crossedOff) {
-        delete state.crossedOff[event.name]
-      }
-    }
-    persist()
-  }
-
-  function addToolHistoryEntry(
-    type: ToolHistoryEntry['type'],
-    params: ToolHistoryEntry['params'],
+  function addTool(
+    type: ToolType,
+    description: string,
+    toolStations: string[],
+    opts?: { reason?: string; params?: ToolParams; enabled?: boolean },
   ): string {
     const id = crypto.randomUUID()
-    state.toolHistory.unshift({ id, type, createdAt: Date.now(), params })
+    state.tools.unshift({
+      id,
+      type,
+      enabled: opts?.enabled ?? true,
+      createdAt: Date.now(),
+      description,
+      stations: toolStations,
+      reason: opts?.reason,
+      params: opts?.params,
+    })
     persist()
     return id
   }
 
-  function removeToolHistoryEntry(id: string) {
-    const idx = state.toolHistory.findIndex((e) => e.id === id)
-    if (idx !== -1) {
-      state.toolHistory.splice(idx, 1)
+  function toggleTool(id: string) {
+    const tool = state.tools.find((t) => t.id === id)
+    if (tool) {
+      tool.enabled = !tool.enabled
       persist()
     }
+  }
+
+  function isToolEnabled(id: string): boolean {
+    return state.tools.find((t) => t.id === id)?.enabled ?? false
+  }
+
+  function removeTool(id: string) {
+    const idx = state.tools.findIndex((t) => t.id === id)
+    if (idx !== -1) {
+      state.tools.splice(idx, 1)
+      persist()
+    }
+  }
+
+  // Single-station manual toggle. Crossing off adds a new manual tool entry; restoring disables
+  // every currently-enabled tool (of any type) that includes this station.
+  function toggleStation(name: string, reason?: string) {
+    if (name in crossedOff.value) {
+      for (const tool of state.tools) {
+        if (tool.enabled && tool.stations.includes(name)) tool.enabled = false
+      }
+      persist()
+    } else {
+      const r = reason ?? 'No reason given'
+      addTool('manual', r, [name], { reason: r })
+    }
+  }
+
+  // Bulk manual mark-off (settings "check all", reachability auto-exclude, etc.) — one tool
+  // entry for the whole batch, so it's a single togglable/undoable unit.
+  function crossOffAll(names: string[], reason: string): string {
+    const fresh = names.filter((n) => !(n in crossedOff.value))
+    if (fresh.length === 0) return ''
+    return addTool('manual', reason, fresh, { reason })
+  }
+
+  // Disables every enabled tool — "Unmark all".
+  function restoreAll() {
+    for (const tool of state.tools) tool.enabled = false
+    persist()
   }
 
   function setStationLines(name: string, lines: string[]) {
@@ -386,7 +347,7 @@ function createStore() {
   }
 
   function getCrossOffReason(name: string): string | undefined {
-    return state.crossedOff[name]
+    return crossedOff.value[name]
   }
 
   function toggleFavorite(name: string) {
@@ -415,12 +376,9 @@ function createStore() {
   }
 
   function resetAll() {
-    state.actions.splice(0, state.actions.length)
-    state.crossedOff = {}
+    state.tools.splice(0, state.tools.length)
     Object.keys(state.lineOverrides).forEach((k) => delete state.lineOverrides[k])
     state.hideNoLineData = true
-    state.stationHistory.splice(0, state.stationHistory.length)
-    state.toolHistory.splice(0, state.toolHistory.length)
     state.favorites.splice(0, state.favorites.length)
     Object.assign(state.mapLayers, DEFAULT_MAP_LAYERS)
     state.showStationLabels = true
@@ -456,14 +414,11 @@ function createStore() {
     filteredStations,
     totalStations,
     reachability,
-    get actions() {
-      return state.actions
-    },
     get activeTab() {
       return state.activeTab
     },
     get crossedOff() {
-      return state.crossedOff
+      return crossedOff.value
     },
     get favorites() {
       return state.favorites
@@ -471,11 +426,8 @@ function createStore() {
     get hideNoLineData() {
       return state.hideNoLineData
     },
-    get stationHistory() {
-      return state.stationHistory
-    },
-    get toolHistory() {
-      return state.toolHistory
+    get tools() {
+      return state.tools
     },
     get mapLayers() {
       return state.mapLayers
@@ -489,7 +441,6 @@ function createStore() {
     get questionCounts() {
       return state.questionCounts
     },
-    addAction,
     setStationLines,
     getStationLines,
     getCrossOffReason,
@@ -500,11 +451,10 @@ function createStore() {
     toggleStation,
     crossOffAll,
     restoreAll,
-    removeStationEvent,
-    addToolHistoryEntry,
-    removeToolHistoryEntry,
-    toggleAction,
-    removeAction,
+    addTool,
+    toggleTool,
+    isToolEnabled,
+    removeTool,
     resetAll,
     setTab,
     toggleMapLayer,
