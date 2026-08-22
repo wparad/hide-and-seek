@@ -32,7 +32,8 @@ async function clearMapCache() {
 const mapLayerLabels: { key: keyof MapLayerVisibility; label: string }[] = [
   { key: 'roads', label: 'Roads & highways' },
   { key: 'rail', label: 'Rail lines' },
-  { key: 'labels', label: 'Place labels' },
+  { key: 'labels', label: 'Road & water labels' },
+  { key: 'regionLabels', label: 'Canton & country names' },
   { key: 'buildings', label: 'Buildings' },
   { key: 'poi', label: 'Points of interest' },
   { key: 'water', label: 'Water' },

@@ -9,6 +9,7 @@ export interface MapLayerVisibility {
   roads: boolean
   rail: boolean
   labels: boolean
+  regionLabels: boolean
   buildings: boolean
   poi: boolean
   water: boolean
@@ -90,6 +91,7 @@ const DEFAULT_MAP_LAYERS: MapLayerVisibility = {
   roads: false,
   rail: true,
   labels: false,
+  regionLabels: true,
   buildings: true,
   poi: false,
   water: true,

@@ -138,7 +138,10 @@ const LAYER_GROUPS: Partial<Record<keyof MapLayerVisibility, RegExp>> = {
   roads:
     /^(tunnel_(motorway|service|link|street|minor|secondary|tertiary|trunk|primary|path)|road_(area|motorway|service|link|minor|secondary|tertiary|trunk|primary|path|one_way)|bridge_(motorway|service|link|street|path|secondary|tertiary|trunk|primary)|highway-shield|road_shield)/,
   rail: /^(tunnel_(major_rail|transit_rail)|road_(major_rail|transit_rail)|bridge_(major_rail|transit_rail))/,
-  labels: /^(label_|waterway_line_label|water_name_|highway-name)/,
+  // label_state = canton names, label_country_1/2/3 = country names — carved out into their own
+  // `regionLabels` group below so they can be shown independently of every other label type.
+  labels: /^(label_(?!state|country_)|waterway_line_label|water_name_|highway-name)/,
+  regionLabels: /^label_(state|country_)/,
   buildings: /^building/,
   poi: /^(poi_|airport)/,
   water: /^(water|waterway)/,
