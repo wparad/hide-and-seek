@@ -189,6 +189,12 @@ if (pendingUrlStation) {
 
 function shareEndgame() {
   const url = new URL(window.location.href)
+  // Endgame's share link is entirely separate from the main map's — never carry the map's tool
+  // history (or another tool's single-geometry share) into it.
+  url.searchParams.delete('t')
+  url.searchParams.delete('c')
+  url.searchParams.delete('bisect')
+  url.searchParams.delete('radius')
   url.searchParams.set('endgame', selectedStation.value)
   url.searchParams.set('radiusKm', String(radiusKm.value))
   if (zones.value.length > 0) url.searchParams.set('zones', encodeZones(zones.value))

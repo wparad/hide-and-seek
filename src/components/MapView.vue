@@ -480,7 +480,13 @@ function buildRadiusShareUrl(): string | null {
   if (!radiusCenter.value) return null
   const [lng, lat] = radiusCenter.value
   const url = new URL(window.location.href)
+  // A single-geometry share carries only this radius — not the map's whole tool history, not
+  // endgame's separate state.
+  url.searchParams.delete('t')
   url.searchParams.delete('c')
+  url.searchParams.delete('endgame')
+  url.searchParams.delete('radiusKm')
+  url.searchParams.delete('zones')
   url.searchParams.set('radius', `${lng.toFixed(6)},${lat.toFixed(6)},${radiusMeters.value}`)
   return url.toString()
 }
@@ -1147,7 +1153,13 @@ function buildBisectShareUrl(): string | null {
   if (!scissorStart.value) return null
   const [lng, lat] = scissorStart.value
   const url = new URL(window.location.href)
-  url.searchParams.delete('c') // don't share crossed-off state
+  // A single-geometry share carries only this bisect — not the map's whole tool history, not
+  // endgame's separate state.
+  url.searchParams.delete('t')
+  url.searchParams.delete('c')
+  url.searchParams.delete('endgame')
+  url.searchParams.delete('radiusKm')
+  url.searchParams.delete('zones')
   url.searchParams.set(
     'bisect',
     `${lng.toFixed(6)},${lat.toFixed(6)},${scissorAngle.value},${scissorDistance.value}`,
@@ -2265,7 +2277,11 @@ watch(userPosition, () => {
             <button class="history-close" @click="showHistory = false">✕</button>
           </div>
           <div class="history-list">
-            <div v-for="entry in store.tools" :key="entry.id" class="history-event">
+            <div
+              v-for="entry in store.tools"
+              :key="entry.id"
+              :class="['history-event', { 'history-event-unknown': entry.type === 'unknown' }]"
+            >
               <div class="history-event-main">
                 <label class="history-checkbox-label">
                   <input
@@ -2724,6 +2740,15 @@ watch(userPosition, () => {
   padding: 10px 14px;
   border-bottom: 1px solid #f0f0f0;
   font-size: 14px;
+}
+
+.history-event-unknown {
+  background: #fffbeb;
+}
+
+.history-event-unknown .history-name {
+  font-style: italic;
+  color: #92400e;
 }
 
 .history-event-main {

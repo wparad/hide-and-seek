@@ -3,7 +3,7 @@ import { stations } from './stations'
 
 export type TabId = 'map' | 'stations' | 'reachability' | 'endgame' | 'rules' | 'settings'
 
-export type ToolType = 'manual' | 'bisect' | 'radius' | 'endgame' | 'distance'
+export type ToolType = 'manual' | 'bisect' | 'radius' | 'endgame' | 'distance' | 'unknown'
 
 export interface MapLayerVisibility {
   roads: boolean
@@ -62,6 +62,11 @@ export interface ToolEntry {
   stations: string[]
   reason?: string
   params?: ToolParams
+  // Only set for type 'unknown' — the original, unparsed `type|enabled|ids|params` segment from
+  // a shared link whose type code this build doesn't recognize (e.g. a newer app version added a
+  // tool type). Preserved verbatim rather than dropped, so it round-trips through re-sharing and
+  // the History panel can tell the user there's something here that needs an app update to see.
+  raw?: string
 }
 
 export interface ReachableInfo {
@@ -114,43 +119,171 @@ function idsToNames(ids: number[]): string[] {
   return ids.map((i) => stations[i]?.name).filter(Boolean) as string[]
 }
 
-function crossedOffFromUrl(): string[] | null {
+// Only these three ever apply to the top-level map, so they're the only ones eligible for the
+// ambient URL sync — endgame has its own completely separate share (?endgame=/?radiusKm=/?zones=)
+// and distance markings are never shared at all. Pressing Share always produces a link for
+// exactly one of "the map" or "the endgame", never both.
+const URL_TOOL_TYPES = ['manual', 'bisect', 'radius'] as const
+type UrlToolType = (typeof URL_TOOL_TYPES)[number]
+const URL_TYPE_CODES: Record<UrlToolType, string> = { manual: 'm', bisect: 'b', radius: 'r' }
+const URL_CODE_TYPES: Record<string, UrlToolType> = { m: 'manual', b: 'bisect', r: 'radius' }
+
+function isFiniteNumber(n: number): boolean {
+  return Number.isFinite(n)
+}
+
+// Encodes a single tool's params in the same compact form its own per-tool Share link already
+// uses. Returns undefined for anything that can't be represented — the entry is then skipped.
+function encodeUrlParams(type: UrlToolType, params: ToolParams | undefined): string {
+  if (type === 'bisect') {
+    const p = params as BisectHistoryParams
+    return `${p.start[0].toFixed(6)},${p.start[1].toFixed(6)},${p.angle},${p.distance}`
+  }
+  if (type === 'radius') {
+    const p = params as RadiusHistoryParams
+    return `${p.center[0].toFixed(6)},${p.center[1].toFixed(6)},${p.meters}`
+  }
+  return ''
+}
+
+function decodeUrlParams(type: UrlToolType, raw: string): ToolParams | undefined {
+  if (type === 'manual') return undefined
+  const parts = raw.split(',').map(Number)
+  if (parts.some((n) => !isFiniteNumber(n))) return undefined
+  if (type === 'bisect') {
+    if (parts.length !== 4 || parts[3] <= 0) return undefined
+    return {
+      start: [parts[0], parts[1]],
+      angle: parts[2],
+      distance: parts[3],
+    } as BisectHistoryParams
+  }
+  // radius
+  if (parts.length !== 3 || parts[2] <= 0) return undefined
+  return { center: [parts[0], parts[1]], meters: parts[2] } as RadiusHistoryParams
+}
+
+function encodeToolForUrl(tool: ToolEntry): string | null {
+  // Unknown entries round-trip verbatim — a link forwarded again shouldn't lose them further.
+  if (tool.type === 'unknown') return tool.raw ?? null
+  if (!URL_TYPE_CODES[tool.type as UrlToolType]) return null
+  const type = tool.type as UrlToolType
+  const ids = namesToIds(tool.stations).join(',')
+  const params = encodeUrlParams(type, tool.params)
+  return [URL_TYPE_CODES[type], tool.enabled ? '1' : '0', ids, params].join('|')
+}
+
+function encodeToolsForUrl(tools: ToolEntry[]): string {
+  return tools
+    .filter((t) => URL_TOOL_TYPES.includes(t.type as UrlToolType) || t.type === 'unknown')
+    .map(encodeToolForUrl)
+    .filter((s): s is string => s !== null)
+    .join(';')
+}
+
+// Parses one `type|enabled|ids|params` entry. Never throws. An unrecognized type code (e.g. a
+// tool type a newer app version added) is preserved as an inert 'unknown' entry rather than
+// dropped, so the History panel can show the user there's something there needing an app update.
+// Malformed params on a *recognized* type is real corruption, not a version-skew case — that
+// entry is just skipped.
+function parseToolEntryFromUrl(raw: string): ToolEntry | null {
+  const [typeCode, enabledStr, idsStr, paramsStr] = raw.split('|')
+  const type = URL_CODE_TYPES[typeCode]
+  if (!type) {
+    return {
+      id: crypto.randomUUID(),
+      type: 'unknown',
+      enabled: false,
+      createdAt: Date.now(),
+      description: 'Unknown tool — update the app to see this',
+      stations: [],
+      raw,
+    }
+  }
+  const ids = (idsStr ?? '')
+    .split(',')
+    .filter(Boolean)
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n >= 0 && n < stations.length)
+  const params = decodeUrlParams(type, paramsStr ?? '')
+  if (type !== 'manual' && !params) return null
+  const toolStations = idsToNames(ids)
+  if (type === 'manual' && toolStations.length === 0) return null
+  const description =
+    type === 'manual'
+      ? 'Imported from URL'
+      : type === 'bisect'
+        ? 'Bisect (shared)'
+        : 'Radius (shared)'
+  return {
+    id: crypto.randomUUID(),
+    type,
+    enabled: enabledStr === '1',
+    createdAt: Date.now(),
+    description,
+    stations: toolStations,
+    reason: type === 'manual' ? description : undefined,
+    params,
+  }
+}
+
+function toolsFromUrl(): ToolEntry[] | null {
+  try {
+    const param = new URLSearchParams(window.location.search).get('t')
+    if (!param) return null
+    const tools = param
+      .split(';')
+      .filter(Boolean)
+      .map(parseToolEntryFromUrl)
+      .filter((t): t is ToolEntry => t !== null)
+    return tools.length > 0 ? tools : null
+  } catch {
+    return null
+  }
+}
+
+// Legacy `?c=` links (pre tool-history-based sharing) — read-only fallback, never written again.
+function legacyCrossedOffFromUrl(): ToolEntry[] | null {
   const param = new URLSearchParams(window.location.search).get('c')
   if (!param) return null
   const ids = param
     .split(',')
     .map(Number)
     .filter((n) => Number.isInteger(n) && n >= 0 && n < stations.length)
-  return idsToNames(ids)
+  const names = idsToNames(ids)
+  if (names.length === 0) return null
+  return [
+    {
+      id: crypto.randomUUID(),
+      type: 'manual',
+      enabled: true,
+      createdAt: Date.now(),
+      description: 'Imported from URL',
+      stations: names,
+      reason: 'Imported from URL',
+    },
+  ]
 }
 
-function syncUrl(crossedOff: Record<string, string>) {
-  const names = Object.keys(crossedOff)
+function toolsFromAnyUrl(): ToolEntry[] | null {
+  return toolsFromUrl() ?? legacyCrossedOffFromUrl()
+}
+
+function syncUrl(tools: ToolEntry[]) {
   const url = new URL(window.location.href)
-  if (names.length === 0) {
-    url.searchParams.delete('c')
+  const encoded = encodeToolsForUrl(tools)
+  if (encoded) {
+    url.searchParams.set('t', encoded)
   } else {
-    url.searchParams.set('c', namesToIds(names).join(','))
+    url.searchParams.delete('t')
   }
+  url.searchParams.delete('c') // legacy param — never re-written
   history.replaceState(null, '', url)
 }
 
-function freshState(fromUrl: string[] | null): GameState {
-  const tools: ToolEntry[] = fromUrl
-    ? [
-        {
-          id: crypto.randomUUID(),
-          type: 'manual',
-          enabled: true,
-          createdAt: Date.now(),
-          description: 'Imported from URL',
-          stations: fromUrl,
-          reason: 'Imported from URL',
-        },
-      ]
-    : []
+function freshState(fromUrl: ToolEntry[] | null): GameState {
   return {
-    tools,
+    tools: fromUrl ?? [],
     activeTab: 'stations',
     favorites: [],
     lineOverrides: {},
@@ -163,7 +296,7 @@ function freshState(fromUrl: string[] | null): GameState {
 }
 
 function loadState(): GameState {
-  const fromUrl = crossedOffFromUrl()
+  const fromUrl = toolsFromAnyUrl()
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
@@ -177,19 +310,7 @@ function loadState(): GameState {
       delete rawMapLayers.boundaries
       delete rawMapLayers.bordersInternational
       delete rawMapLayers.bordersCantonal
-      const tools: ToolEntry[] = fromUrl
-        ? [
-            {
-              id: crypto.randomUUID(),
-              type: 'manual',
-              enabled: true,
-              createdAt: Date.now(),
-              description: 'Imported from URL',
-              stations: fromUrl,
-              reason: 'Imported from URL',
-            },
-          ]
-        : (parsed.tools ?? [])
+      const tools: ToolEntry[] = fromUrl ?? parsed.tools ?? []
       return {
         tools,
         activeTab: parsed.activeTab ?? 'stations',
@@ -265,7 +386,7 @@ function createStore() {
 
   function persist() {
     saveState(state)
-    syncUrl(crossedOff.value)
+    syncUrl(state.tools)
   }
 
   function addTool(
