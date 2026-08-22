@@ -88,8 +88,6 @@ let radiusCenterMarker: maplibregl.Marker | null = null
 // GPS location state
 let gpsMarker: maplibregl.Marker | null = null
 
-// bordersInternational/bordersCantonal are handled separately (custom layers, see
-// borders-international/borders-cantonal below) rather than via this vendor-style regex toggle.
 const LAYER_GROUPS: Partial<Record<keyof MapLayerVisibility, RegExp>> = {
   roads:
     /^(tunnel_(motorway|service|link|street|minor|secondary|tertiary|trunk|primary|path)|road_(area|motorway|service|link|minor|secondary|tertiary|trunk|primary|path|one_way)|bridge_(motorway|service|link|street|path|secondary|tertiary|trunk|primary)|highway-shield|road_shield)/,
@@ -113,20 +111,6 @@ function syncMapLayers() {
         break
       }
     }
-  }
-  if (map.getLayer('borders-international')) {
-    map.setLayoutProperty(
-      'borders-international',
-      'visibility',
-      store.mapLayers.bordersInternational ? 'visible' : 'none',
-    )
-  }
-  if (map.getLayer('borders-cantonal')) {
-    map.setLayoutProperty(
-      'borders-cantonal',
-      'visibility',
-      store.mapLayers.bordersCantonal ? 'visible' : 'none',
-    )
   }
 }
 
@@ -1287,17 +1271,20 @@ onMounted(() => {
 
     // International/cantonal borders — read from the base style's own vector source
     // (OpenMapTiles schema: admin_level 2 = international, 4 = state/canton), styled distinctly
-    // and toggled independently rather than reusing the vendor's own boundary_* layers.
+    // rather than reusing the vendor's own boundary_* layers. Always drawn (no visibility
+    // setting). The international filter is restricted to Switzerland's own border (adm0_l/
+    // adm0_r = 'CHE') instead of every country's border worldwide, since that's the only one
+    // this map ever needs and the vector tiles otherwise carry boundary features for the whole
+    // planet.
     map.addLayer({
       id: 'borders-cantonal',
       type: 'line',
       source: 'openmaptiles',
       'source-layer': 'boundary',
       filter: ['==', ['get', 'admin_level'], 4],
-      layout: { visibility: store.mapLayers.bordersCantonal ? 'visible' : 'none' },
       paint: {
-        'line-color': '#888',
-        'line-width': 1.5,
+        'line-color': '#000',
+        'line-width': 2.5,
         'line-dasharray': [3, 2],
       },
     })
@@ -1306,8 +1293,11 @@ onMounted(() => {
       type: 'line',
       source: 'openmaptiles',
       'source-layer': 'boundary',
-      filter: ['==', ['get', 'admin_level'], 2],
-      layout: { visibility: store.mapLayers.bordersInternational ? 'visible' : 'none' },
+      filter: [
+        'all',
+        ['==', ['get', 'admin_level'], 2],
+        ['any', ['==', ['get', 'adm0_l'], 'CHE'], ['==', ['get', 'adm0_r'], 'CHE']],
+      ],
       paint: {
         'line-color': '#000',
         'line-width': 2.5,

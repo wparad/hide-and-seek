@@ -27,8 +27,6 @@ export interface MapLayerVisibility {
   labels: boolean
   buildings: boolean
   poi: boolean
-  bordersInternational: boolean
-  bordersCantonal: boolean
   water: boolean
   landuse: boolean
 }
@@ -86,8 +84,6 @@ const DEFAULT_MAP_LAYERS: MapLayerVisibility = {
   labels: false,
   buildings: true,
   poi: false,
-  bordersInternational: false,
-  bordersCantonal: false,
   water: true,
   landuse: true,
 }
@@ -152,13 +148,11 @@ function loadState(): GameState {
       const crossedOff = fromUrl
         ? Object.fromEntries(fromUrl.map((n) => [n, 'Imported from URL']))
         : (parsed.crossedOff ?? {})
-      // Migrate the old single `boundaries` toggle into the two new border layers.
+      // Drop legacy border-visibility toggles — borders are now always drawn.
       const rawMapLayers = { ...(parsed.mapLayers ?? {}) }
-      if ('boundaries' in rawMapLayers) {
-        rawMapLayers.bordersInternational ??= rawMapLayers.boundaries
-        rawMapLayers.bordersCantonal ??= rawMapLayers.boundaries
-        delete rawMapLayers.boundaries
-      }
+      delete rawMapLayers.boundaries
+      delete rawMapLayers.bordersInternational
+      delete rawMapLayers.bordersCantonal
       return {
         actions: parsed.actions ?? [],
         activeTab: parsed.activeTab ?? 'stations',
