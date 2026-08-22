@@ -35,7 +35,8 @@ const mapLayerLabels: { key: keyof MapLayerVisibility; label: string }[] = [
   { key: 'labels', label: 'Place labels' },
   { key: 'buildings', label: 'Buildings' },
   { key: 'poi', label: 'Points of interest' },
-  { key: 'boundaries', label: 'Boundaries' },
+  { key: 'bordersInternational', label: 'International borders' },
+  { key: 'bordersCantonal', label: 'Cantonal borders' },
   { key: 'water', label: 'Water' },
   { key: 'landuse', label: 'Land use & parks' },
 ]

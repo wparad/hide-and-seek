@@ -1,0 +1,35 @@
+name: PR Checks
+
+# Deliberately the `pull_request` event (not `pull_request_target`): GitHub Actions checks out
+# the ephemeral `refs/pull/<PR>/merge` ref by default for this event — a test-merge of the PR
+# head into the current tip of the base branch — so this job runs against the PR as merged into
+# main, not the PR branch in isolation. Never override the checkout `ref`/`sha` for this job, or
+# that guarantee is lost and CI can pass on code that's actually out of date with main.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check (types + lint + format)
+        run: npm run check
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build

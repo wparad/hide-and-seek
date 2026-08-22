@@ -15,6 +15,9 @@
     "prepare": "git config core.hooksPath .hooks"
   },
   "dependencies": {
+    "@turf/circle": "^7.4.0",
+    "@turf/helpers": "^7.4.0",
+    "@turf/intersect": "^7.4.0",
     "maplibre-gl": "^5.22.0",
     "vue": "^3.5.0"
   },

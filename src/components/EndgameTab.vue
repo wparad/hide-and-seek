@@ -1,17 +1,24 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { circle as turfCircle } from '@turf/circle'
+import { intersect as turfIntersect } from '@turf/intersect'
+import { featureCollection as turfFeatureCollection } from '@turf/helpers'
 import { stations } from '../stations'
 import { useStore } from '../store'
 import { userPosition } from '../gps'
+import { showToast } from '../toast'
 
 const STORAGE_KEY = 'hide-and-seek-endgame'
 
-interface ExclusionCircle {
+// A zone answers "inside?" — yes shrinks the displayed hiding zone to the intersection with this
+// zone (same opacity as the default hiding zone); no behaves like the old exclusion zones (subtract).
+interface Zone {
   id: string
   center: [number, number]
   radiusM: number
+  inside: boolean
 }
 
 interface EndgameState {
@@ -19,7 +26,7 @@ interface EndgameState {
   radiusKm: number
   zoom: number
   center: [number, number] | null
-  exclusions: ExclusionCircle[]
+  zones: Zone[]
 }
 
 // Single source of truth for the fixed hiding-zone radius choices.
@@ -38,14 +45,25 @@ function defaultEndgameState(): EndgameState {
     radiusKm: DEFAULT_RADIUS_KM,
     zoom: 0,
     center: null,
-    exclusions: [],
+    zones: [],
   }
 }
 
 function loadState(): EndgameState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return { ...defaultEndgameState(), ...JSON.parse(raw) }
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      // Migrate legacy { exclusions: [...] } (always "outside") into zones with inside: false.
+      const rawZones: Array<Partial<Zone>> = parsed.zones ?? parsed.exclusions ?? []
+      const zones: Zone[] = rawZones.map((z) => ({
+        id: z.id ?? crypto.randomUUID(),
+        center: z.center as [number, number],
+        radiusM: z.radiusM ?? 500,
+        inside: z.inside ?? false,
+      }))
+      return { ...defaultEndgameState(), ...parsed, zones }
+    }
   } catch {
     /* corrupted */
   }
@@ -66,10 +84,10 @@ const radiusKm = ref(
 )
 const savedZoom = ref(saved.zoom)
 const savedCenter = ref<[number, number] | null>(saved.center)
-const exclusions = ref<ExclusionCircle[]>(saved.exclusions ?? [])
-const selectedExclusion = ref<string | null>(null)
+const zones = ref<Zone[]>(saved.zones ?? [])
+const selectedZone = ref<string | null>(null)
 const placingMode = ref(false)
-const showClearExclModal = ref(false)
+const showClearZonesModal = ref(false)
 const mapEl = ref<HTMLDivElement | null>(null)
 const rulerCanvas = ref<HTMLCanvasElement | null>(null)
 const drawCanvas = ref<HTMLCanvasElement | null>(null)
@@ -126,13 +144,56 @@ function updateGpsMarker() {
   }
 }
 
-const pendingUrlStation = new URLSearchParams(window.location.search).get('endgame')
+function encodeZones(list: Zone[]): string {
+  return list
+    .map(
+      (z) => `${z.center[0].toFixed(6)},${z.center[1].toFixed(6)},${z.radiusM},${z.inside ? 1 : 0}`,
+    )
+    .join(';')
+}
 
-// Remove ?endgame= from URL immediately (consumed in onMounted via selectStation)
+function decodeZones(raw: string): Zone[] {
+  return raw
+    .split(';')
+    .filter(Boolean)
+    .map((part) => {
+      const [lng, lat, radiusM, inside] = part.split(',').map(Number)
+      return {
+        id: crypto.randomUUID(),
+        center: [lng, lat] as [number, number],
+        radiusM,
+        inside: inside === 1,
+      }
+    })
+}
+
+const urlParams = new URLSearchParams(window.location.search)
+const pendingUrlStation = urlParams.get('endgame')
+const pendingUrlRadiusKm = urlParams.get('radiusKm')
+const pendingUrlZones = urlParams.get('zones')
+
+// Remove ?endgame=/?radiusKm=/?zones= from URL immediately (consumed in onMounted)
 if (pendingUrlStation) {
   const url = new URL(window.location.href)
   url.searchParams.delete('endgame')
+  url.searchParams.delete('radiusKm')
+  url.searchParams.delete('zones')
   history.replaceState(null, '', url)
+}
+
+function shareEndgame() {
+  const url = new URL(window.location.href)
+  url.searchParams.set('endgame', selectedStation.value)
+  url.searchParams.set('radiusKm', String(radiusKm.value))
+  if (zones.value.length > 0) url.searchParams.set('zones', encodeZones(zones.value))
+  else url.searchParams.delete('zones')
+  navigator.clipboard.writeText(url.toString())
+  showToast('Link copied', 'success')
+  store.addToolHistoryEntry('endgame', {
+    station: selectedStation.value,
+    radiusKm: radiusKm.value,
+    zones: zones.value.map((z) => ({ center: z.center, radiusM: z.radiusM, inside: z.inside })),
+  })
 }
 
 function normalize(str: string): string {
@@ -173,9 +234,7 @@ const station = computed(
   () => stations.find((s) => s.name === selectedStation.value) ?? stations[0],
 )
 
-const activeExclusion = computed(() =>
-  exclusions.value.find((e) => e.id === selectedExclusion.value),
-)
+const activeZone = computed(() => zones.value.find((z) => z.id === selectedZone.value))
 
 function getZoomForWidthKm(lat: number, widthKm: number, containerWidth: number): number {
   const cosLat = Math.cos((lat * Math.PI) / 180)
@@ -203,86 +262,129 @@ function buildCircleCoords(center: [number, number], radiusM: number): [number, 
   return coords
 }
 
+// Base hiding-zone circle intersected with every "inside" zone (AND — must be within all of
+// them), via Turf. "Outside" zones don't affect this shape — they're rendered separately as an
+// overlay, unchanged from the old exclusion-zone behavior.
 function buildHidingZoneGeoJSON(): GeoJSON.FeatureCollection {
-  const coords = buildCircleCoords(station.value.coordinates, radiusKm.value * 1000)
+  let shape: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null = turfCircle(
+    station.value.coordinates,
+    radiusKm.value,
+    { steps: 64, units: 'kilometers' },
+  )
+  for (const z of zones.value.filter((z) => z.inside)) {
+    if (!shape) break
+    const zCircle = turfCircle(z.center, z.radiusM / 1000, { steps: 64, units: 'kilometers' })
+    shape = turfIntersect(turfFeatureCollection([shape, zCircle]))
+  }
+  return { type: 'FeatureCollection', features: shape ? [shape] : [] }
+}
+
+function buildOutsideZonesGeoJSON(): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
-    features: [
-      {
-        type: 'Feature',
-        geometry: { type: 'Polygon', coordinates: [coords] },
-        properties: {},
-      },
-    ],
+    features: zones.value
+      .filter((z) => !z.inside)
+      .map((z) => ({
+        type: 'Feature' as const,
+        geometry: {
+          type: 'Polygon' as const,
+          coordinates: [buildCircleCoords(z.center, z.radiusM)],
+        },
+        properties: { id: z.id, selected: z.id === selectedZone.value ? 'yes' : 'no' },
+      })),
   }
 }
 
-function buildExclusionsGeoJSON(): GeoJSON.FeatureCollection {
+// Dashed outline of each raw "inside" zone circle, so its boundary stays visible once it's
+// been absorbed into the composite hiding-zone shape.
+function buildInsideZoneOutlinesGeoJSON(): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
-    features: exclusions.value.map((ex) => ({
+    features: zones.value
+      .filter((z) => z.inside)
+      .map((z) => ({
+        type: 'Feature' as const,
+        geometry: {
+          type: 'Polygon' as const,
+          coordinates: [buildCircleCoords(z.center, z.radiusM)],
+        },
+        properties: { id: z.id, selected: z.id === selectedZone.value ? 'yes' : 'no' },
+      })),
+  }
+}
+
+function buildZoneCentersGeoJSON(): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: zones.value.map((z) => ({
       type: 'Feature' as const,
-      geometry: {
-        type: 'Polygon' as const,
-        coordinates: [buildCircleCoords(ex.center, ex.radiusM)],
-      },
-      properties: { id: ex.id, selected: ex.id === selectedExclusion.value ? 'yes' : 'no' },
+      geometry: { type: 'Point' as const, coordinates: z.center },
+      properties: { id: z.id, inside: z.inside ? 'yes' : 'no' },
     })),
   }
 }
 
-function buildExclusionCentersGeoJSON(): GeoJSON.FeatureCollection {
-  return {
-    type: 'FeatureCollection',
-    features: exclusions.value.map((ex) => ({
-      type: 'Feature' as const,
-      geometry: { type: 'Point' as const, coordinates: ex.center },
-      properties: { id: ex.id },
-    })),
-  }
-}
-
-function updateExclusionLayers() {
+function updateZoneLayers() {
   if (!map) return
-  const fillSource = map.getSource('exclusions-fill') as maplibregl.GeoJSONSource | undefined
+  const hidingSource = map.getSource('hiding-zone') as maplibregl.GeoJSONSource | undefined
+  const outsideSource = map.getSource('exclusions-fill') as maplibregl.GeoJSONSource | undefined
+  const insideOutlineSource = map.getSource('inside-zone-outlines') as
+    | maplibregl.GeoJSONSource
+    | undefined
   const centerSource = map.getSource('exclusion-centers') as maplibregl.GeoJSONSource | undefined
-  if (fillSource) fillSource.setData(buildExclusionsGeoJSON())
-  if (centerSource) centerSource.setData(buildExclusionCentersGeoJSON())
+  const hidingData = buildHidingZoneGeoJSON()
+  if (hidingSource) hidingSource.setData(hidingData)
+  if (outsideSource) outsideSource.setData(buildOutsideZonesGeoJSON())
+  if (insideOutlineSource) insideOutlineSource.setData(buildInsideZoneOutlinesGeoJSON())
+  if (centerSource) centerSource.setData(buildZoneCentersGeoJSON())
+  if (hidingData.features.length === 0 && zones.value.some((z) => z.inside)) {
+    showToast('Inside zones do not overlap — hiding zone is empty', 'error')
+  }
 }
 
-function addExclusion(lngLat: [number, number]) {
-  const ex: ExclusionCircle = {
+function addZone(lngLat: [number, number]) {
+  const z: Zone = {
     id: crypto.randomUUID(),
     center: lngLat,
     radiusM: 500,
+    inside: false,
   }
-  exclusions.value.push(ex)
-  selectedExclusion.value = ex.id
-  updateExclusionLayers()
+  zones.value.push(z)
+  selectedZone.value = z.id
+  updateZoneLayers()
   persist()
 }
 
-function removeExclusion(id: string) {
-  const idx = exclusions.value.findIndex((e) => e.id === id)
-  if (idx !== -1) exclusions.value.splice(idx, 1)
-  if (selectedExclusion.value === id) selectedExclusion.value = null
-  updateExclusionLayers()
+function removeZone(id: string) {
+  const idx = zones.value.findIndex((z) => z.id === id)
+  if (idx !== -1) zones.value.splice(idx, 1)
+  if (selectedZone.value === id) selectedZone.value = null
+  updateZoneLayers()
   persist()
 }
 
-function removeAllExclusions() {
-  exclusions.value.splice(0, exclusions.value.length)
-  selectedExclusion.value = null
-  showClearExclModal.value = false
-  updateExclusionLayers()
+function removeAllZones() {
+  zones.value.splice(0, zones.value.length)
+  selectedZone.value = null
+  showClearZonesModal.value = false
+  updateZoneLayers()
   persist()
 }
 
-function updateExclusionRadius(id: string, radiusM: number) {
-  const ex = exclusions.value.find((e) => e.id === id)
-  if (ex) {
-    ex.radiusM = radiusM
-    updateExclusionLayers()
+function updateZoneRadius(id: string, radiusM: number) {
+  const z = zones.value.find((z) => z.id === id)
+  if (z) {
+    z.radiusM = radiusM
+    updateZoneLayers()
+    persist()
+  }
+}
+
+function updateZoneInside(id: string, inside: boolean) {
+  const z = zones.value.find((z) => z.id === id)
+  if (z) {
+    z.inside = inside
+    updateZoneLayers()
     persist()
   }
 }
@@ -295,7 +397,7 @@ function persist() {
     radiusKm: radiusKm.value,
     zoom,
     center,
-    exclusions: exclusions.value,
+    zones: zones.value,
   })
 }
 
@@ -457,22 +559,45 @@ function clearDrawing() {
   if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height)
 }
 
+// The draw canvas already isolates just the drawn line (transparent background) — composite it
+// onto a white background so only the line is visible, then auto-download.
 function saveDrawing() {
-  if (!drawCanvas.value) return
-  drawCanvas.value.toBlob((blob) => {
-    if (!blob) return
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `tracing.png`
-    a.click()
-    URL.revokeObjectURL(url)
-  }, 'image/png')
+  const lineCanvas = drawCanvas.value
+  if (!lineCanvas) return
+  try {
+    const out = document.createElement('canvas')
+    out.width = lineCanvas.width
+    out.height = lineCanvas.height
+    const ctx = out.getContext('2d')
+    if (!ctx) throw new Error('no context')
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, out.width, out.height)
+    ctx.drawImage(lineCanvas, 0, 0)
+    out.toBlob((blob) => {
+      if (!blob) {
+        showToast('Could not export image', 'error')
+        return
+      }
+      try {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${Math.floor(Date.now() / 1000)}.png`
+        a.click()
+        URL.revokeObjectURL(url)
+        showToast('Drawing saved', 'success')
+      } catch {
+        showToast('Download failed', 'error')
+      }
+    }, 'image/png')
+  } catch {
+    showToast('Could not export image', 'error')
+  }
 }
 
 function handleMapClick(e: maplibregl.MapMouseEvent) {
   if (placingMode.value) {
-    addExclusion([e.lngLat.lng, e.lngLat.lat])
+    addZone([e.lngLat.lng, e.lngLat.lat])
     placingMode.value = false
     return
   }
@@ -481,12 +606,12 @@ function handleMapClick(e: maplibregl.MapMouseEvent) {
   if (features.length > 0) {
     const id = features[0].properties?.id
     if (id) {
-      selectedExclusion.value = selectedExclusion.value === id ? null : id
-      updateExclusionLayers()
+      selectedZone.value = selectedZone.value === id ? null : id
+      updateZoneLayers()
     }
   } else {
-    selectedExclusion.value = null
-    updateExclusionLayers()
+    selectedZone.value = null
+    updateZoneLayers()
   }
 }
 
@@ -569,8 +694,8 @@ onMounted(() => {
       paint: { 'line-color': '#16a34a', 'line-width': 2 },
     })
 
-    // Exclusion circles (red)
-    map.addSource('exclusions-fill', { type: 'geojson', data: buildExclusionsGeoJSON() })
+    // Outside zones — subtract-style overlay (red), unchanged from the old exclusion zones
+    map.addSource('exclusions-fill', { type: 'geojson', data: buildOutsideZonesGeoJSON() })
     map.addLayer({
       id: 'exclusions-fill-layer',
       type: 'fill',
@@ -590,15 +715,32 @@ onMounted(() => {
       },
     })
 
-    // Exclusion center points (for click detection)
-    map.addSource('exclusion-centers', { type: 'geojson', data: buildExclusionCentersGeoJSON() })
+    // Inside zones — dashed blue outline of the raw circle, kept visible once absorbed into
+    // the composite hiding-zone shape.
+    map.addSource('inside-zone-outlines', {
+      type: 'geojson',
+      data: buildInsideZoneOutlinesGeoJSON(),
+    })
+    map.addLayer({
+      id: 'inside-zone-outline-layer',
+      type: 'line',
+      source: 'inside-zone-outlines',
+      paint: {
+        'line-color': '#0ea5e9',
+        'line-width': ['case', ['==', ['get', 'selected'], 'yes'], 3, 1.5],
+        'line-dasharray': [3, 2],
+      },
+    })
+
+    // Zone center points (for click detection) — all zones, colored by inside/outside
+    map.addSource('exclusion-centers', { type: 'geojson', data: buildZoneCentersGeoJSON() })
     map.addLayer({
       id: 'exclusion-centers-layer',
       type: 'circle',
       source: 'exclusion-centers',
       paint: {
         'circle-radius': 12,
-        'circle-color': '#dc2626',
+        'circle-color': ['case', ['==', ['get', 'inside'], 'yes'], '#0ea5e9', '#dc2626'],
         'circle-stroke-width': 2,
         'circle-stroke-color': '#fff',
       },
@@ -628,10 +770,21 @@ onMounted(() => {
 
     drawRuler()
 
-    // If URL had ?endgame=StationName, select it now (same path as dropdown)
+    // If URL had ?endgame=StationName (+ optional ?radiusKm=/?zones=), load it now
     if (pendingUrlStation) {
       const match = stations.find((s) => s.name === pendingUrlStation)
       if (match) selectStation(match.name)
+      if (pendingUrlRadiusKm) {
+        const km = Number(pendingUrlRadiusKm)
+        if (!Number.isNaN(km)) {
+          radiusKm.value = !store.flexibleHidingZone && !isFixedRadius(km) ? DEFAULT_RADIUS_KM : km
+        }
+      }
+      if (pendingUrlZones) {
+        zones.value = decodeZones(pendingUrlZones)
+      }
+      updateZoneLayers()
+      persist()
     }
   })
 })
@@ -690,6 +843,9 @@ watch(userPosition, () => {
   }
 })
 
+// The pencil toggle also drives fullscreen (see .fullscreen-draw in the template): the map
+// wrapper is teleported to <body> and expanded to fill the viewport, locked in place, until the
+// pencil is pressed again.
 watch(drawMode, (active) => {
   if (!map) return
   if (active) {
@@ -697,7 +853,16 @@ watch(drawMode, (active) => {
     map.scrollZoom.disable()
     map.doubleClickZoom.disable()
     map.touchZoomRotate.disable()
-    // Size canvas immediately (rounded to match getDrawCtx's stable comparison)
+  } else {
+    map.dragPan.enable()
+    map.scrollZoom.enable()
+    map.doubleClickZoom.enable()
+    map.touchZoomRotate.enable()
+  }
+  // The container's pixel size changes when entering/exiting fullscreen — resize the map and
+  // re-size/re-draw the overlay canvases only after that layout change has actually happened.
+  nextTick(() => {
+    map?.resize()
     if (drawCanvas.value && mapEl.value) {
       const dpr = window.devicePixelRatio || 1
       drawCanvas.value.width = Math.round(mapEl.value.clientWidth * dpr)
@@ -705,12 +870,8 @@ watch(drawMode, (active) => {
       drawCanvas.value.style.width = `${mapEl.value.clientWidth}px`
       drawCanvas.value.style.height = `${mapEl.value.clientHeight}px`
     }
-  } else {
-    map.dragPan.enable()
-    map.scrollZoom.enable()
-    map.doubleClickZoom.enable()
-    map.touchZoomRotate.enable()
-  }
+    drawRuler()
+  })
 })
 
 const radiusLabel = computed(() => {
@@ -718,9 +879,9 @@ const radiusLabel = computed(() => {
   return `${Math.round(m)} m`
 })
 
-const exclusionRadiusLabel = computed(() => {
-  if (!activeExclusion.value) return ''
-  const m = activeExclusion.value.radiusM
+const zoneRadiusLabel = computed(() => {
+  if (!activeZone.value) return ''
+  const m = activeZone.value.radiusM
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${m} m`
 })
 </script>
@@ -762,6 +923,8 @@ const exclusionRadiusLabel = computed(() => {
         </div>
       </label>
 
+      <button class="endgame-share-btn" @click="shareEndgame">🔗 Share</button>
+
       <a
         class="gmaps-link"
         :href="`https://www.google.com/maps/@${station.coordinates[1]},${station.coordinates[0]},16z`"
@@ -801,92 +964,105 @@ const exclusionRadiusLabel = computed(() => {
             :class="['excl-btn', { active: placingMode }]"
             @click="placingMode = !placingMode"
           >
-            {{ placingMode ? 'Cancel' : '+ Exclusion zone' }}
+            {{ placingMode ? 'Cancel' : '+ Zone' }}
           </button>
           <button
-            v-if="exclusions.length > 0"
+            v-if="zones.length > 0"
             class="excl-btn excl-clear-btn"
-            @click="showClearExclModal = true"
+            @click="showClearZonesModal = true"
           >
-            Remove all ({{ exclusions.length }})
+            Remove all ({{ zones.length }})
           </button>
         </div>
 
-        <div v-if="activeExclusion" class="excl-selected">
+        <div v-if="activeZone" class="excl-selected">
+          <div class="zone-inside-toggle">
+            <button
+              :class="['zone-toggle-btn', { active: !activeZone.inside }]"
+              @click="updateZoneInside(activeZone!.id, false)"
+            >
+              Outside (exclude)
+            </button>
+            <button
+              :class="['zone-toggle-btn', { active: activeZone.inside }]"
+              @click="updateZoneInside(activeZone!.id, true)"
+            >
+              Inside (must be within)
+            </button>
+          </div>
           <label class="endgame-field">
-            <span class="endgame-label">Exclusion radius: {{ exclusionRadiusLabel }}</span>
+            <span class="endgame-label">Zone radius: {{ zoneRadiusLabel }}</span>
             <input
-              :value="activeExclusion.radiusM"
+              :value="activeZone.radiusM"
               type="range"
               min="0"
               max="2000"
               step="10"
               class="endgame-slider excl-slider"
               @input="
-                updateExclusionRadius(
-                  activeExclusion!.id,
-                  Number(($event.target as HTMLInputElement).value),
-                )
+                updateZoneRadius(activeZone!.id, Number(($event.target as HTMLInputElement).value))
               "
             />
           </label>
-          <button class="excl-remove-btn" @click="removeExclusion(activeExclusion!.id)">
-            Remove
-          </button>
+          <button class="excl-remove-btn" @click="removeZone(activeZone!.id)">Remove</button>
         </div>
       </div>
     </div>
 
-    <div class="endgame-map-wrapper">
-      <div ref="mapEl" class="endgame-map"></div>
-      <canvas ref="rulerCanvas" class="ruler-overlay"></canvas>
-      <canvas
-        ref="drawCanvas"
-        :class="['draw-overlay', { active: drawMode }]"
-        @mousedown="onDrawStart"
-        @mousemove="onDrawMove"
-        @mouseup="onDrawEnd"
-        @mouseleave="onDrawEnd"
-        @touchstart="onDrawStart"
-        @touchmove="onDrawMove"
-        @touchend="onDrawEnd"
-      ></canvas>
-      <div class="draw-toolbar">
-        <button
-          :class="['draw-toggle', { active: drawMode }]"
-          @click="drawMode ? ((drawMode = false), clearDrawing()) : (drawMode = true)"
-        >
-          ✏️
-        </button>
-        <template v-if="drawMode">
-          <button class="draw-btn" @click="clearDrawing">
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M3 10h10c4 0 6 2 6 5s-2 5-6 5H9" />
-              <polyline points="7 6 3 10 7 14" />
-            </svg>
+    <Teleport to="body" :disabled="!drawMode">
+      <div :class="['endgame-map-wrapper', { 'fullscreen-draw': drawMode }]">
+        <div ref="mapEl" class="endgame-map"></div>
+        <canvas ref="rulerCanvas" class="ruler-overlay"></canvas>
+        <canvas
+          ref="drawCanvas"
+          :class="['draw-overlay', { active: drawMode }]"
+          @mousedown="onDrawStart"
+          @mousemove="onDrawMove"
+          @mouseup="onDrawEnd"
+          @mouseleave="onDrawEnd"
+          @touchstart="onDrawStart"
+          @touchmove="onDrawMove"
+          @touchend="onDrawEnd"
+        ></canvas>
+        <div class="draw-toolbar">
+          <button
+            :class="['draw-toggle', { active: drawMode }]"
+            @click="drawMode ? ((drawMode = false), clearDrawing()) : (drawMode = true)"
+          >
+            ✏️
           </button>
-          <button class="draw-btn" @click="saveDrawing">💾</button>
-        </template>
+          <template v-if="drawMode">
+            <button class="draw-btn" @click="clearDrawing">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M3 10h10c4 0 6 2 6 5s-2 5-6 5H9" />
+                <polyline points="7 6 3 10 7 14" />
+              </svg>
+            </button>
+            <button class="draw-btn" @click="saveDrawing">💾</button>
+          </template>
+        </div>
+        <div v-if="placingMode" class="placing-hint">Tap map to place zone</div>
       </div>
-      <div v-if="placingMode" class="placing-hint">Tap map to place exclusion zone</div>
-    </div>
+    </Teleport>
 
     <Teleport to="body">
-      <div v-if="showClearExclModal" class="overlay" @click.self="showClearExclModal = false">
+      <div v-if="showClearZonesModal" class="overlay" @click.self="showClearZonesModal = false">
         <div class="modal">
-          <p class="modal-text">Remove all {{ exclusions.length }} exclusion zones?</p>
+          <p class="modal-text">Remove all {{ zones.length }} zones?</p>
           <div class="modal-buttons">
-            <button class="modal-btn cancel-btn" @click="showClearExclModal = false">Cancel</button>
-            <button class="modal-btn confirm-btn" @click="removeAllExclusions">Remove all</button>
+            <button class="modal-btn cancel-btn" @click="showClearZonesModal = false">
+              Cancel
+            </button>
+            <button class="modal-btn confirm-btn" @click="removeAllZones">Remove all</button>
           </div>
         </div>
       </div>
@@ -961,6 +1137,18 @@ const exclusionRadiusLabel = computed(() => {
   color: #0066cc;
   text-decoration: none;
   align-self: flex-start;
+}
+
+.endgame-share-btn {
+  align-self: flex-start;
+  padding: 6px 12px;
+  background: #fff;
+  border: 1px solid #0066cc;
+  border-radius: 6px;
+  color: #0066cc;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .gmaps-link:active {
@@ -1079,6 +1267,29 @@ const exclusionRadiusLabel = computed(() => {
   border: 1px solid #fecaca;
 }
 
+.zone-inside-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.zone-toggle-btn {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+}
+
+.zone-toggle-btn.active {
+  background: #0ea5e9;
+  color: #fff;
+  border-color: #0ea5e9;
+}
+
 .excl-remove-btn {
   padding: 6px 12px;
   background: #dc2626;
@@ -1095,6 +1306,12 @@ const exclusionRadiusLabel = computed(() => {
   flex: 1;
   min-height: 0;
   position: relative;
+}
+
+.endgame-map-wrapper.fullscreen-draw {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
 }
 
 .endgame-map {
