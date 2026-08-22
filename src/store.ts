@@ -27,9 +27,40 @@ export interface MapLayerVisibility {
   labels: boolean
   buildings: boolean
   poi: boolean
-  boundaries: boolean
+  bordersInternational: boolean
+  bordersCantonal: boolean
   water: boolean
   landuse: boolean
+}
+
+export interface ToolHistoryZone {
+  center: [number, number]
+  radiusM: number
+  inside: boolean
+}
+
+export interface BisectHistoryParams {
+  start: [number, number]
+  angle: number
+  distance: number
+}
+
+export interface RadiusHistoryParams {
+  center: [number, number]
+  meters: number
+}
+
+export interface EndgameHistoryParams {
+  station: string
+  radiusKm: number
+  zones: ToolHistoryZone[]
+}
+
+export interface ToolHistoryEntry {
+  id: string
+  type: 'bisect' | 'radius' | 'endgame'
+  createdAt: number
+  params: BisectHistoryParams | RadiusHistoryParams | EndgameHistoryParams
 }
 
 export interface ReachableInfo {
@@ -55,7 +86,8 @@ const DEFAULT_MAP_LAYERS: MapLayerVisibility = {
   labels: false,
   buildings: true,
   poi: false,
-  boundaries: false,
+  bordersInternational: false,
+  bordersCantonal: false,
   water: true,
   landuse: true,
 }
@@ -68,6 +100,7 @@ interface GameState {
   lineOverrides: Record<string, string[]>
   hideNoLineData: boolean
   stationHistory: StationEvent[]
+  toolHistory: ToolHistoryEntry[]
   mapLayers: MapLayerVisibility
   showStationLabels: boolean
   flexibleHidingZone: boolean
@@ -119,6 +152,13 @@ function loadState(): GameState {
       const crossedOff = fromUrl
         ? Object.fromEntries(fromUrl.map((n) => [n, 'Imported from URL']))
         : (parsed.crossedOff ?? {})
+      // Migrate the old single `boundaries` toggle into the two new border layers.
+      const rawMapLayers = { ...(parsed.mapLayers ?? {}) }
+      if ('boundaries' in rawMapLayers) {
+        rawMapLayers.bordersInternational ??= rawMapLayers.boundaries
+        rawMapLayers.bordersCantonal ??= rawMapLayers.boundaries
+        delete rawMapLayers.boundaries
+      }
       return {
         actions: parsed.actions ?? [],
         activeTab: parsed.activeTab ?? 'stations',
@@ -127,7 +167,8 @@ function loadState(): GameState {
         lineOverrides: parsed.lineOverrides ?? {},
         hideNoLineData: parsed.hideNoLineData ?? true,
         stationHistory: parsed.stationHistory ?? [],
-        mapLayers: { ...DEFAULT_MAP_LAYERS, ...(parsed.mapLayers ?? {}) },
+        toolHistory: parsed.toolHistory ?? [],
+        mapLayers: { ...DEFAULT_MAP_LAYERS, ...rawMapLayers },
         showStationLabels: parsed.showStationLabels ?? true,
         flexibleHidingZone: parsed.flexibleHidingZone ?? false,
         questionCounts: parsed.questionCounts ?? {},
@@ -149,6 +190,7 @@ function freshState(fromUrl: string[] | null): GameState {
     lineOverrides: {},
     hideNoLineData: true,
     stationHistory: [],
+    toolHistory: [],
     mapLayers: { ...DEFAULT_MAP_LAYERS },
     showStationLabels: true,
     flexibleHidingZone: false,
@@ -168,6 +210,7 @@ function saveState(state: GameState) {
       lineOverrides: state.lineOverrides,
       hideNoLineData: state.hideNoLineData,
       stationHistory: state.stationHistory,
+      toolHistory: state.toolHistory,
       mapLayers: state.mapLayers,
       showStationLabels: state.showStationLabels,
       flexibleHidingZone: state.flexibleHidingZone,
@@ -280,13 +323,16 @@ function createStore() {
     persist()
   }
 
-  function crossOffAll(names: string[], reason: string) {
+  function crossOffAll(names: string[], reason: string): string[] {
     const now = Date.now()
+    const ids: string[] = []
     for (const name of names) {
       if (name in state.crossedOff) continue
       state.crossedOff[name] = reason
+      const id = crypto.randomUUID()
+      ids.push(id)
       state.stationHistory.push({
-        id: crypto.randomUUID(),
+        id,
         name,
         type: 'cross-off',
         reason,
@@ -294,6 +340,7 @@ function createStore() {
       })
     }
     persist()
+    return ids
   }
 
   function restoreAll() {
@@ -315,6 +362,24 @@ function createStore() {
       }
     }
     persist()
+  }
+
+  function addToolHistoryEntry(
+    type: ToolHistoryEntry['type'],
+    params: ToolHistoryEntry['params'],
+  ): string {
+    const id = crypto.randomUUID()
+    state.toolHistory.unshift({ id, type, createdAt: Date.now(), params })
+    persist()
+    return id
+  }
+
+  function removeToolHistoryEntry(id: string) {
+    const idx = state.toolHistory.findIndex((e) => e.id === id)
+    if (idx !== -1) {
+      state.toolHistory.splice(idx, 1)
+      persist()
+    }
   }
 
   function setStationLines(name: string, lines: string[]) {
@@ -361,6 +426,7 @@ function createStore() {
     Object.keys(state.lineOverrides).forEach((k) => delete state.lineOverrides[k])
     state.hideNoLineData = true
     state.stationHistory.splice(0, state.stationHistory.length)
+    state.toolHistory.splice(0, state.toolHistory.length)
     state.favorites.splice(0, state.favorites.length)
     Object.assign(state.mapLayers, DEFAULT_MAP_LAYERS)
     state.showStationLabels = true
@@ -414,6 +480,9 @@ function createStore() {
     get stationHistory() {
       return state.stationHistory
     },
+    get toolHistory() {
+      return state.toolHistory
+    },
     get mapLayers() {
       return state.mapLayers
     },
@@ -438,6 +507,8 @@ function createStore() {
     crossOffAll,
     restoreAll,
     removeStationEvent,
+    addToolHistoryEntry,
+    removeToolHistoryEntry,
     toggleAction,
     removeAction,
     resetAll,

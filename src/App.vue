@@ -7,6 +7,7 @@ import ReachabilityTab from './components/ReachabilityTab.vue'
 import EndgameTab from './components/EndgameTab.vue'
 import RulesTab from './components/RulesTab.vue'
 import SettingsTab from './components/SettingsTab.vue'
+import ToastHost from './components/ToastHost.vue'
 
 const store = useStore()
 
@@ -70,6 +71,8 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
         <span class="tab-label">{{ tab.label }}</span>
       </button>
     </nav>
+
+    <ToastHost />
   </div>
 </template>
 
