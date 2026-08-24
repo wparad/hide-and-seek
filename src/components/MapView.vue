@@ -157,6 +157,12 @@ function syncMapLayers() {
       if (pattern.test(layer.id)) {
         const visible = store.mapLayers[group as keyof MapLayerVisibility]
         map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none')
+        if (group === 'regionLabels') {
+          // The base style hides canton/country names above zoom 8/9 (meant for whole-country
+          // views), but this app opens at zoom 10 on a Zurich-area city view — extend the range
+          // so the toggle actually has an effect at the zoom levels this app is used at.
+          map.setLayerZoomRange(layer.id, 0, 24)
+        }
         break
       }
     }
