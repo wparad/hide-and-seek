@@ -2037,7 +2037,7 @@ watch(userPosition, () => {
     <div ref="mapEl" class="map-container" />
     <canvas ref="rulerCanvas" class="ruler-overlay"></canvas>
 
-    <div class="map-controls">
+    <div v-if="!radiusMode && !scissorMode && !distanceMode" class="map-controls">
       <button class="menu-trigger" @click="menuOpen = !menuOpen">⋮</button>
       <div v-if="menuOpen" class="menu-items">
         <button
@@ -2102,7 +2102,7 @@ watch(userPosition, () => {
       </label>
     </div>
 
-    <div v-if="distanceMarkings.length > 0" class="distance-stack">
+    <div v-if="distanceMarkings.length > 0 && !distanceMode" class="distance-stack">
       <div v-for="m in distanceMarkings" :key="m.id" class="distance-stack-row">
         <span class="distance-swatch"></span>
         <span class="distance-stack-label">{{ m.description }}</span>
@@ -2111,11 +2111,16 @@ watch(userPosition, () => {
     </div>
 
     <div v-if="radiusMode" class="radius-panel">
-      <div class="radius-label">
-        {{ radiusMeters >= 1000 ? `${(radiusMeters / 1000).toFixed(1)} km` : `${radiusMeters} m` }}
-        <span v-if="stationsInRadius.size > 0" class="radius-count">
-          · {{ radiusInsideCount }} stations
-        </span>
+      <div class="tool-back-row">
+        <button class="tool-back-btn" @click="clearRadius">← Back</button>
+        <div class="radius-label">
+          {{
+            radiusMeters >= 1000 ? `${(radiusMeters / 1000).toFixed(1)} km` : `${radiusMeters} m`
+          }}
+          <span v-if="stationsInRadius.size > 0" class="radius-count">
+            · {{ radiusInsideCount }} stations
+          </span>
+        </div>
       </div>
       <input
         v-model.number="radiusMeters"
@@ -2135,7 +2140,6 @@ watch(userPosition, () => {
         }}
       </div>
       <div v-if="radiusCenter" class="radius-actions">
-        <button class="radius-action-btn radius-clear-btn" @click="clearRadius">Clear</button>
         <button class="radius-action-btn radius-lock-btn" @click="toggleRadiusLock">
           {{ radiusLocked ? '🔓 Unlock to edit' : '🔒 Lock' }}
         </button>
@@ -2164,18 +2168,21 @@ watch(userPosition, () => {
     </div>
 
     <div v-if="scissorMode" class="scissor-panel">
-      <div class="scissor-label">
-        ✂️ Bisect Tool
-        <span v-if="scissorLocked" class="scissor-distance-label"> · shared view</span>
-        <span v-else-if="scissorCenter" class="scissor-distance-label">
-          ·
-          {{
-            scissorDistance >= 1000
-              ? `${(scissorDistance / 1000).toFixed(1)} km`
-              : `${scissorDistance} m`
-          }}
-          apart
-        </span>
+      <div class="tool-back-row">
+        <button class="tool-back-btn" @click="clearScissor">← Back</button>
+        <div class="scissor-label">
+          ✂️ Bisect Tool
+          <span v-if="scissorLocked" class="scissor-distance-label"> · shared view</span>
+          <span v-else-if="scissorCenter" class="scissor-distance-label">
+            ·
+            {{
+              scissorDistance >= 1000
+                ? `${(scissorDistance / 1000).toFixed(1)} km`
+                : `${scissorDistance} m`
+            }}
+            apart
+          </span>
+        </div>
       </div>
       <div v-if="!scissorLocked" class="scissor-controls">
         <label class="scissor-field">
@@ -2191,7 +2198,6 @@ watch(userPosition, () => {
         {{ scissorCenter ? 'Drag the purple handle to set angle' : 'Tap map to place start point' }}
       </div>
       <div v-if="scissorCenter" class="scissor-actions">
-        <button class="scissor-cancel-btn" @click="clearScissor">Cancel</button>
         <button class="scissor-lock-btn" @click="toggleScissorLock">
           {{ scissorLocked ? '🔓 Unlock to edit' : '🔒 Lock' }}
         </button>
@@ -2229,7 +2235,10 @@ watch(userPosition, () => {
     </div>
 
     <div v-if="distanceMode" class="distance-panel">
-      <div class="distance-label">📏 Distance Tool</div>
+      <div class="tool-back-row">
+        <button class="tool-back-btn" @click="clearDistanceMode">← Back</button>
+        <div class="distance-label">📏 Distance Tool</div>
+      </div>
       <div v-if="distancePreviewMeters !== null" class="distance-preview">
         {{ formatDistance(distancePreviewMeters) }}
       </div>
@@ -2242,9 +2251,9 @@ watch(userPosition, () => {
               : 'Drag either point to adjust, or Add to save it'
         }}
       </div>
-      <div class="distance-actions">
+      <div v-if="distancePointA" class="distance-actions">
         <button class="distance-action-btn distance-cancel-btn" @click="cancelDistancePlacement">
-          Cancel
+          Restart
         </button>
         <button
           v-if="distancePointA && distancePointB"
@@ -2455,14 +2464,37 @@ watch(userPosition, () => {
 
 .radius-panel {
   position: absolute;
-  bottom: 12px;
+  top: 12px;
   left: 12px;
-  right: 12px;
+  right: 60px;
   background: #fff;
   border-radius: 10px;
   padding: 10px 14px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   z-index: 10;
+}
+
+.tool-back-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.tool-back-btn {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #f3f4f6;
+  color: #111827;
+  cursor: pointer;
+}
+
+.tool-back-btn:active {
+  background: #e5e7eb;
 }
 
 .radius-label {
@@ -2586,9 +2618,9 @@ watch(userPosition, () => {
 
 .distance-panel {
   position: absolute;
-  bottom: 12px;
+  top: 12px;
   left: 12px;
-  right: 12px;
+  right: 60px;
   background: #fff;
   border-radius: 10px;
   padding: 10px 14px;
