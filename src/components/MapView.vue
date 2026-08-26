@@ -134,6 +134,34 @@ const distanceMarkings = computed(() =>
 // GPS location state
 let gpsMarker: maplibregl.Marker | null = null
 
+// OpenStreetMap has no place=state nodes for Swiss cantons (unlike German Länder or Austrian
+// states), so the base style's label_state layer never has canton data to draw, at any zoom —
+// extending its zoom range (see regionLabels handling below) does nothing. Label the cantons that
+// matter for this app ourselves, from a small fixed list of centroids, always shown regardless of
+// zoom, like the boundary lines already drawn independently of the vendor style.
+const CANTON_LABELS: { name: string; coordinates: [number, number] }[] = [
+  { name: 'ZÜRICH', coordinates: [8.65, 47.41] },
+  { name: 'AARGAU', coordinates: [8.14, 47.4] },
+  { name: 'THURGAU', coordinates: [9.1, 47.57] },
+  { name: 'ST. GALLEN', coordinates: [9.35, 47.23] },
+  { name: 'SCHWYZ', coordinates: [8.75, 47.02] },
+  { name: 'ZUG', coordinates: [8.51, 47.15] },
+  { name: 'SCHAFFHAUSEN', coordinates: [8.63, 47.7] },
+  { name: 'GLARUS', coordinates: [9.07, 46.98] },
+  { name: 'LUZERN', coordinates: [8.1, 47.05] },
+]
+
+function buildCantonLabelsGeoJSON(): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: CANTON_LABELS.map((c) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: c.coordinates },
+      properties: { name: c.name },
+    })),
+  }
+}
+
 const LAYER_GROUPS: Partial<Record<keyof MapLayerVisibility, RegExp>> = {
   roads:
     /^(tunnel_(motorway|service|link|street|minor|secondary|tertiary|trunk|primary|path)|road_(area|motorway|service|link|minor|secondary|tertiary|trunk|primary|path|one_way)|bridge_(motorway|service|link|street|path|secondary|tertiary|trunk|primary)|highway-shield|road_shield)/,
@@ -1665,6 +1693,30 @@ onMounted(() => {
       paint: {
         'line-color': '#000',
         'line-width': 2.5,
+      },
+    })
+
+    // Canton names — own source/labels (see CANTON_LABELS above), always shown regardless of
+    // zoom. Named label_state_ch so it's picked up by the regionLabels group below and stays
+    // togglable alongside the vendor's (data-less, for Switzerland) label_state layer.
+    map.addSource('canton-labels', { type: 'geojson', data: buildCantonLabelsGeoJSON() })
+    map.addLayer({
+      id: 'label_state_ch',
+      type: 'symbol',
+      source: 'canton-labels',
+      layout: {
+        'text-field': ['get', 'name'],
+        'text-font': ['Noto Sans Italic'],
+        'text-letter-spacing': 0.2,
+        'text-size': 13,
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
+      },
+      paint: {
+        'text-color': '#333',
+        'text-halo-color': '#fff',
+        'text-halo-width': 1,
+        'text-halo-blur': 1,
       },
     })
 
