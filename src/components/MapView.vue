@@ -14,6 +14,8 @@ import {
 import { stations, locations, buildGeoLines } from '../stations'
 import { userPosition } from '../gps'
 import { showToast } from '../toast'
+import { cantonBorders } from '../canton-borders'
+import { switzerlandMask } from '../switzerland-mask'
 
 const store = useStore()
 const mapEl = ref<HTMLDivElement | null>(null)
@@ -136,30 +138,19 @@ let gpsMarker: maplibregl.Marker | null = null
 
 // OpenStreetMap has no place=state nodes for Swiss cantons (unlike German Länder or Austrian
 // states), so the base style's label_state layer never has canton data to draw, at any zoom —
-// extending its zoom range (see regionLabels handling below) does nothing. Label the cantons that
-// matter for this app ourselves, from a small fixed list of centroids, always shown regardless of
-// zoom, like the boundary lines already drawn independently of the vendor style.
-const CANTON_LABELS: { name: string; coordinates: [number, number] }[] = [
-  { name: 'ZÜRICH', coordinates: [8.65, 47.41] },
-  { name: 'AARGAU', coordinates: [8.14, 47.4] },
-  { name: 'THURGAU', coordinates: [9.1, 47.57] },
-  { name: 'ST. GALLEN', coordinates: [9.35, 47.23] },
-  { name: 'SCHWYZ', coordinates: [8.75, 47.02] },
-  { name: 'ZUG', coordinates: [8.51, 47.15] },
-  { name: 'SCHAFFHAUSEN', coordinates: [8.63, 47.7] },
-  { name: 'GLARUS', coordinates: [9.07, 46.98] },
-  { name: 'LUZERN', coordinates: [8.1, 47.05] },
-]
+// extending its zoom range (see regionLabels handling below) does nothing. Canton names instead
+// come from `cantonBorders` (own bundled boundary data, see scripts/fetch-canton-borders.ts) and
+// are drawn running along each canton's own border, always on regardless of zoom.
 
-function buildCantonLabelsGeoJSON(): GeoJSON.FeatureCollection {
-  return {
-    type: 'FeatureCollection',
-    features: CANTON_LABELS.map((c) => ({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: c.coordinates },
-      properties: { name: c.name },
-    })),
-  }
+// The vendor boundary source has no name for the CHE side of an international border either, but
+// it does carry adm0_l/adm0_r ISO3 country codes on admin_level=2 lines — enough to label the
+// neighboring country by a lookup, without needing our own bundled data for those.
+const NEIGHBOR_COUNTRY_NAMES: Record<string, string> = {
+  DEU: 'Deutschland',
+  AUT: 'Österreich',
+  ITA: 'Italien',
+  FRA: 'Frankreich',
+  LIE: 'Liechtenstein',
 }
 
 const LAYER_GROUPS: Partial<Record<keyof MapLayerVisibility, RegExp>> = {
@@ -174,6 +165,7 @@ const LAYER_GROUPS: Partial<Record<keyof MapLayerVisibility, RegExp>> = {
   poi: /^(poi_|airport)/,
   water: /^(water|waterway)/,
   landuse: /^(landuse_|landcover_|park)/,
+  nonSwissMask: /^switzerland-mask-layer$/,
 }
 
 function syncMapLayers() {
@@ -1661,6 +1653,31 @@ onMounted(() => {
       },
     })
 
+    // Grey hatch overlay over everything that isn't Switzerland (switzerlandMask is a single
+    // world-rectangle-minus-Switzerland polygon — see scripts/fetch-canton-borders.ts). Added
+    // before the border/station layers so it sits underneath them.
+    const hatchCanvas = document.createElement('canvas')
+    hatchCanvas.width = 8
+    hatchCanvas.height = 8
+    const hatchCtx = hatchCanvas.getContext('2d')!
+    hatchCtx.strokeStyle = '#6b7280'
+    hatchCtx.lineWidth = 1
+    hatchCtx.beginPath()
+    hatchCtx.moveTo(0, 8)
+    hatchCtx.lineTo(8, 0)
+    hatchCtx.stroke()
+    map.addImage('non-switzerland-hatch', hatchCtx.getImageData(0, 0, 8, 8))
+    map.addSource('switzerland-mask', { type: 'geojson', data: switzerlandMask })
+    map.addLayer({
+      id: 'switzerland-mask-layer',
+      type: 'fill',
+      source: 'switzerland-mask',
+      paint: {
+        'fill-pattern': 'non-switzerland-hatch',
+        'fill-opacity': 0.55,
+      },
+    })
+
     // International/cantonal borders — read from the base style's own vector source
     // (OpenMapTiles schema: admin_level 2 = international, 4 = state/canton), styled distinctly
     // rather than reusing the vendor's own boundary_* layers. Always drawn (no visibility
@@ -1696,19 +1713,70 @@ onMounted(() => {
       },
     })
 
-    // Canton names — own source/labels (see CANTON_LABELS above), always shown regardless of
-    // zoom. Named label_state_ch so it's picked up by the regionLabels group below and stays
-    // togglable alongside the vendor's (data-less, for Switzerland) label_state layer.
-    map.addSource('canton-labels', { type: 'geojson', data: buildCantonLabelsGeoJSON() })
+    // Canton names — own source (see cantonBorders above), one label repeated along each
+    // canton's own border line, oriented parallel to it, always on regardless of zoom. Named
+    // label_state_ch so it's picked up by the regionLabels group below and stays togglable
+    // alongside the vendor's (data-less, for Switzerland) label_state layer.
+    map.addSource('canton-borders', { type: 'geojson', data: cantonBorders })
     map.addLayer({
       id: 'label_state_ch',
       type: 'symbol',
-      source: 'canton-labels',
+      source: 'canton-borders',
       layout: {
         'text-field': ['get', 'name'],
         'text-font': ['Noto Sans Italic'],
         'text-letter-spacing': 0.2,
-        'text-size': 13,
+        'text-size': 10,
+        'symbol-placement': 'line',
+        'symbol-spacing': 350,
+        'text-rotation-alignment': 'map',
+        'text-keep-upright': true,
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
+      },
+      paint: {
+        'text-color': '#333',
+        'text-halo-color': '#fff',
+        'text-halo-width': 1,
+        'text-halo-blur': 1,
+      },
+    })
+
+    // Country names along Switzerland's international border. The vendor boundary source has
+    // no name for admin_level 2 lines, only adm0_l/adm0_r ISO3 codes — pick whichever side isn't
+    // 'CHE' and look up its name. Named label_country_ch so it's picked up by the regionLabels
+    // group below, same as label_state_ch above.
+    const neighborCode: maplibregl.ExpressionSpecification = [
+      'case',
+      ['==', ['get', 'adm0_l'], 'CHE'],
+      ['get', 'adm0_r'],
+      ['get', 'adm0_l'],
+    ]
+    const neighborName = [
+      'match',
+      neighborCode,
+      ...Object.entries(NEIGHBOR_COUNTRY_NAMES).flat(),
+      '',
+    ] as unknown as maplibregl.ExpressionSpecification
+    map.addLayer({
+      id: 'label_country_ch',
+      type: 'symbol',
+      source: 'openmaptiles',
+      'source-layer': 'boundary',
+      filter: [
+        'all',
+        ['==', ['get', 'admin_level'], 2],
+        ['any', ['==', ['get', 'adm0_l'], 'CHE'], ['==', ['get', 'adm0_r'], 'CHE']],
+      ],
+      layout: {
+        'text-field': neighborName,
+        'text-font': ['Noto Sans Bold'],
+        'text-letter-spacing': 0.2,
+        'text-size': 10,
+        'symbol-placement': 'line',
+        'symbol-spacing': 350,
+        'text-rotation-alignment': 'map',
+        'text-keep-upright': true,
         'text-allow-overlap': true,
         'text-ignore-placement': true,
       },

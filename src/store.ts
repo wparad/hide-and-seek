@@ -14,6 +14,7 @@ export interface MapLayerVisibility {
   poi: boolean
   water: boolean
   landuse: boolean
+  nonSwissMask: boolean
 }
 
 export interface ToolHistoryZone {
@@ -96,6 +97,7 @@ const DEFAULT_MAP_LAYERS: MapLayerVisibility = {
   poi: false,
   water: true,
   landuse: true,
+  nonSwissMask: true,
 }
 
 interface GameState {
