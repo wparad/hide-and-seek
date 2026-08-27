@@ -16,6 +16,7 @@ import { userPosition } from '../gps'
 import { showToast } from '../toast'
 import { cantonBorders } from '../canton-borders'
 import { switzerlandMask } from '../switzerland-mask'
+import ShareQr from './ShareQr.vue'
 
 const store = useStore()
 const mapEl = ref<HTMLDivElement | null>(null)
@@ -1227,14 +1228,14 @@ const shareModalPoints = computed<ShareModalPoint[]>(() => {
   return []
 })
 
-function shareModalUrl(): string | null {
+const shareModalUrl = computed<string | null>(() => {
   if (shareModalKind.value === 'bisect') return buildBisectShareUrl()
   if (shareModalKind.value === 'radius') return buildRadiusShareUrl()
   return null
-}
+})
 
 function copyShareModalUrl() {
-  const url = shareModalUrl()
+  const url = shareModalUrl.value
   if (!url) return
   navigator.clipboard.writeText(url)
   showToast('Share link copied', 'success')
@@ -2397,6 +2398,7 @@ watch(userPosition, () => {
             </span>
             <button class="share-point-copy" @click="copySharePointCoords(point)">📋</button>
           </div>
+          <ShareQr v-if="shareModalUrl" :url="shareModalUrl" />
           <div class="modal-buttons">
             <button class="modal-btn cancel-btn" @click="shareModalKind = null">Close</button>
             <button class="modal-btn confirm-btn" @click="copyShareModalUrl">

@@ -9,6 +9,7 @@ import { stations } from '../stations'
 import { useStore } from '../store'
 import { userPosition } from '../gps'
 import { showToast } from '../toast'
+import ShareQr from './ShareQr.vue'
 
 const STORAGE_KEY = 'hide-and-seek-endgame'
 
@@ -187,6 +188,9 @@ if (pendingUrlStation) {
   history.replaceState(null, '', url)
 }
 
+const shareModalOpen = ref(false)
+const shareModalUrl = ref<string | null>(null)
+
 function shareEndgame() {
   const url = new URL(window.location.href)
   // Endgame's share link is entirely separate from the main map's — never carry the map's tool
@@ -199,8 +203,8 @@ function shareEndgame() {
   url.searchParams.set('radiusKm', String(radiusKm.value))
   if (zones.value.length > 0) url.searchParams.set('zones', encodeZones(zones.value))
   else url.searchParams.delete('zones')
-  navigator.clipboard.writeText(url.toString())
-  showToast('Link copied', 'success')
+  shareModalUrl.value = url.toString()
+  shareModalOpen.value = true
   store.addTool('endgame', `Endgame · ${selectedStation.value}`, [], {
     params: {
       station: selectedStation.value,
@@ -208,6 +212,12 @@ function shareEndgame() {
       zones: zones.value.map((z) => ({ center: z.center, radiusM: z.radiusM, inside: z.inside })),
     },
   })
+}
+
+function copyShareModalUrl() {
+  if (!shareModalUrl.value) return
+  navigator.clipboard.writeText(shareModalUrl.value)
+  showToast('Link copied', 'success')
 }
 
 function normalize(str: string): string {
@@ -1134,6 +1144,21 @@ const zoneRadiusLabel = computed(() => {
           </template>
         </div>
         <div v-if="placingMode" class="placing-hint">Tap map to place zone</div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="shareModalOpen" class="overlay" @click.self="shareModalOpen = false">
+        <div class="modal">
+          <p class="modal-text">Share endgame</p>
+          <ShareQr v-if="shareModalUrl" :url="shareModalUrl" />
+          <div class="modal-buttons">
+            <button class="modal-btn cancel-btn" @click="shareModalOpen = false">Close</button>
+            <button class="modal-btn confirm-btn" @click="copyShareModalUrl">
+              🔗 Copy share URL
+            </button>
+          </div>
+        </div>
       </div>
     </Teleport>
   </div>
