@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@turf/mask": "^7.4.0",
+    "@turf/point-on-feature": "^7.4.0",
     "@turf/polygon-to-line": "^7.4.0",
     "@types/geojson": "^7946.0.16",
     "@types/qrcode": "^1.5.6",

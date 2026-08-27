@@ -4365,3 +4365,139 @@ export const cantonBorders: GeoJSON.FeatureCollection = {
     },
   ],
 }
+
+export const cantonCenters: GeoJSON.FeatureCollection = {
+  type: 'FeatureCollection',
+  features: [
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [8.674315517355742, 47.428375737301806] },
+      properties: { name: 'Zürich' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [7.6585486758916685, 46.83858423675262] },
+      properties: { name: 'Bern' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [8.177024122381075, 47.032334168890415] },
+      properties: { name: 'Luzern' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [8.679204144628374, 46.76016612477453] },
+      properties: { name: 'Uri' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [8.698140551420064, 47.054083530082025] },
+      properties: { name: 'Schwyz' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [8.275751916841017, 46.8679722144181] },
+      properties: { name: 'Obwalden' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [8.402687652575228, 46.89705916286295] },
+      properties: { name: 'Nidwalden' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [9.063214245561355, 46.98616381217394] },
+      properties: { name: 'Glarus' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [8.549852190816885, 47.1663674293827] },
+      properties: { name: 'Zug' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [7.060787561796696, 46.71888749289355] },
+      properties: { name: 'Freiburg' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [7.677822229391817, 47.29039146828854] },
+      properties: { name: 'Solothurn' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [7.618821555411772, 47.55153431719829] },
+      properties: { name: 'Basel-Stadt' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [7.627137840887054, 47.46423584321117] },
+      properties: { name: 'Basel-Landschaft' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [8.660829649017446, 47.68775003954026] },
+      properties: { name: 'Schaffhausen' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [9.41311633782206, 47.370314726369855] },
+      properties: { name: 'Appenzell Ausserrhoden' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [9.465261695396805, 47.3394968599063] },
+      properties: { name: 'Appenzell Innerrhoden' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [9.23588955140962, 47.211371297869164] },
+      properties: { name: 'St. Gallen' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [9.575059140117766, 46.61868239107126] },
+      properties: { name: 'Graubünden' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [8.08503926209028, 47.37787808553857] },
+      properties: { name: 'Aargau' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [9.086926897389525, 47.53700965730216] },
+      properties: { name: 'Thurgau' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [8.773492840760294, 46.23295107346697] },
+      properties: { name: 'Tessin' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [6.657447716245492, 46.58816555382836] },
+      properties: { name: 'Waadt' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [7.627924516540121, 46.25744732629698] },
+      properties: { name: 'Wallis' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [6.761007946859991, 47.00990749195233] },
+      properties: { name: 'Neuenburg' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [6.130487410926573, 46.252819002029554] },
+      properties: { name: 'Genf' },
+    },
+    {
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [7.2007596369245945, 47.33185824343242] },
+      properties: { name: 'Jura' },
+    },
+  ],
+}
