@@ -672,7 +672,8 @@ function zoneEdgePoint(z: Zone): [number, number] {
 function createEdgeHandleEl(): HTMLDivElement {
   const el = document.createElement('div')
   el.style.cssText =
-    'width:22px;height:22px;border-radius:50%;background:#0ea5e9;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:ew-resize;touch-action:none;'
+    'width:28px;height:28px;border-radius:50%;background:#fff;border:3px solid #0ea5e9;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:ew-resize;touch-action:none;display:flex;align-items:center;justify-content:center;font-size:16px;color:#0ea5e9;user-select:none;'
+  el.textContent = '↔'
   return el
 }
 

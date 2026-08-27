@@ -14,7 +14,7 @@ import {
 import { stations, locations, buildGeoLines } from '../stations'
 import { userPosition } from '../gps'
 import { showToast } from '../toast'
-import { cantonBorders } from '../canton-borders'
+import { cantonBorders, cantonCenters } from '../canton-borders'
 import { switzerlandMask } from '../switzerland-mask'
 import ShareQr from './ShareQr.vue'
 
@@ -115,6 +115,7 @@ let arrowHeadB: maplibregl.Marker | null = null
 let hotterMarker: maplibregl.Marker | null = null
 let colderMarker: maplibregl.Marker | null = null
 let radiusCenterMarker: maplibregl.Marker | null = null
+let radiusEdgeMarker: maplibregl.Marker | null = null
 // Fixed px offset from center along the bisect line — deliberately far from the endpoint so the
 // handle never overlaps the endpoint's coordinate display, and large enough to grab easily.
 const HANDLE_OFFSET_PX = 110
@@ -140,8 +141,11 @@ let gpsMarker: maplibregl.Marker | null = null
 // OpenStreetMap has no place=state nodes for Swiss cantons (unlike German Länder or Austrian
 // states), so the base style's label_state layer never has canton data to draw, at any zoom —
 // extending its zoom range (see regionLabels handling below) does nothing. Canton names instead
-// come from `cantonBorders` (own bundled boundary data, see scripts/fetch-canton-borders.ts) and
-// are drawn running along each canton's own border, always on regardless of zoom.
+// come from `cantonBorders`/`cantonCenters` (own bundled boundary/centroid data, see
+// scripts/fetch-canton-borders.ts): a name running along each canton's own border, always on
+// regardless of zoom, plus a second horizontal label at the canton's center once zoomed out past
+// level 8, where the border-hugging label's tight curves stop reading cleanly. Zürich skips the
+// center label — the map opens centered on it, so its own borders are already obvious.
 
 // The vendor boundary source has no name for the CHE side of an international border either, but
 // it does carry adm0_l/adm0_r ISO3 country codes on admin_level=2 lines — enough to label the
@@ -178,10 +182,12 @@ function syncMapLayers() {
       if (pattern.test(layer.id)) {
         const visible = store.mapLayers[group as keyof MapLayerVisibility]
         map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none')
-        if (group === 'regionLabels') {
+        if (group === 'regionLabels' && layer.id !== 'label_state_ch_main') {
           // The base style hides canton/country names above zoom 8/9 (meant for whole-country
           // views), but this app opens at zoom 10 on a Zurich-area city view — extend the range
           // so the toggle actually has an effect at the zoom levels this app is used at.
+          // label_state_ch_main is excluded: it keeps its own minzoom (8) so it only appears
+          // once zoomed out, rather than always.
           map.setLayerZoomRange(layer.id, 0, 24)
         }
         break
@@ -337,6 +343,7 @@ function updateRadiusCircle() {
     source.setData({ type: 'FeatureCollection', features: [] })
     stationsInRadius.value = new Set()
     updateRadiusCenterMarker()
+    updateRadiusEdgeMarker()
     return
   }
 
@@ -351,6 +358,7 @@ function updateRadiusCircle() {
   }
   stationsInRadius.value = inRange
   updateRadiusCenterMarker()
+  updateRadiusEdgeMarker()
 }
 
 function createRadiusCenterEl(): HTMLDivElement {
@@ -387,6 +395,51 @@ function updateRadiusCenterMarker() {
     radiusCenterMarker.on('drag', onRadiusCenterDrag)
   } else {
     radiusCenterMarker.setLngLat(radiusCenter.value)
+  }
+}
+
+// Point due east of the circle's center at its current radius — the draggable handle that
+// resizes the circle without moving its center, same convention as the Endgame zone's edge
+// handle.
+function radiusEdgePoint(center: [number, number], radiusM: number): [number, number] {
+  const dLngPerM = 1 / (111320 * Math.cos((center[1] * Math.PI) / 180))
+  return [center[0] + radiusM * dLngPerM, center[1]]
+}
+
+function createRadiusEdgeEl(): HTMLDivElement {
+  const el = document.createElement('div')
+  el.style.cssText =
+    'width:28px;height:28px;border-radius:50%;background:#fff;border:3px solid #f59e0b;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:ew-resize;touch-action:none;display:flex;align-items:center;justify-content:center;font-size:16px;color:#f59e0b;user-select:none;'
+  el.textContent = '↔'
+  return el
+}
+
+function onRadiusEdgeDrag() {
+  if (!radiusEdgeMarker || !radiusCenter.value) return
+  const { lng, lat } = radiusEdgeMarker.getLngLat()
+  const meters = haversineMeters(radiusCenter.value, [lng, lat])
+  radiusMeters.value = Math.min(30000, Math.max(100, Math.round(meters)))
+  updateRadiusCircle()
+}
+
+function updateRadiusEdgeMarker() {
+  if (!map) return
+  if (!radiusCenter.value || radiusLocked.value) {
+    radiusEdgeMarker?.remove()
+    radiusEdgeMarker = null
+    return
+  }
+  const pos = radiusEdgePoint(radiusCenter.value, radiusMeters.value)
+  if (!radiusEdgeMarker) {
+    radiusEdgeMarker = new maplibregl.Marker({
+      element: createRadiusEdgeEl(),
+      draggable: true,
+    })
+      .setLngLat(pos)
+      .addTo(map)
+    radiusEdgeMarker.on('drag', onRadiusEdgeDrag)
+  } else {
+    radiusEdgeMarker.setLngLat(pos)
   }
 }
 
@@ -1727,7 +1780,7 @@ onMounted(() => {
         'text-field': ['get', 'name'],
         'text-font': ['Noto Sans Italic'],
         'text-letter-spacing': 0.2,
-        'text-size': 10,
+        'text-size': 13,
         'symbol-placement': 'line',
         'symbol-spacing': 350,
         'text-rotation-alignment': 'map',
@@ -1739,6 +1792,34 @@ onMounted(() => {
         'text-color': '#333',
         'text-halo-color': '#fff',
         'text-halo-width': 1,
+        'text-halo-blur': 1,
+      },
+    })
+
+    // Horizontal "main" canton label at the canton's center — a second, always-upright name
+    // shown once zoomed out past level 8, where the line-following label above (bent along the
+    // border's own curves) gets harder to read. Zürich is excluded: the map opens centered on
+    // it, so its borders are already obvious without a dedicated label.
+    map.addSource('canton-centers', { type: 'geojson', data: cantonCenters })
+    map.addLayer({
+      id: 'label_state_ch_main',
+      type: 'symbol',
+      source: 'canton-centers',
+      filter: ['!=', ['get', 'name'], 'Zürich'],
+      minzoom: 8,
+      layout: {
+        'text-field': ['get', 'name'],
+        'text-font': ['Noto Sans Bold'],
+        'text-letter-spacing': 0.2,
+        'text-size': 15,
+        'symbol-placement': 'point',
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
+      },
+      paint: {
+        'text-color': '#333',
+        'text-halo-color': '#fff',
+        'text-halo-width': 1.5,
         'text-halo-blur': 1,
       },
     })
@@ -2045,6 +2126,7 @@ onUnmounted(() => {
   hotterMarker?.remove()
   colderMarker?.remove()
   radiusCenterMarker?.remove()
+  radiusEdgeMarker?.remove()
   distanceMarkerA?.remove()
   distanceMarkerB?.remove()
   gpsMarker?.remove()
@@ -2256,7 +2338,7 @@ watch(userPosition, () => {
           radiusLocked
             ? 'Shared view — drag disabled'
             : radiusCenter
-              ? 'Tap map to move center, or drag the marker'
+              ? 'Tap map to move center, drag the marker, or drag the edge handle to resize'
               : 'Tap map to place circle'
         }}
       </div>
