@@ -14,6 +14,9 @@ import {
 import { stations, locations, buildGeoLines } from '../stations'
 import { userPosition } from '../gps'
 import { showToast } from '../toast'
+import { cantonBorders } from '../canton-borders'
+import { switzerlandMask } from '../switzerland-mask'
+import ShareQr from './ShareQr.vue'
 
 const store = useStore()
 const mapEl = ref<HTMLDivElement | null>(null)
@@ -134,6 +137,23 @@ const distanceMarkings = computed(() =>
 // GPS location state
 let gpsMarker: maplibregl.Marker | null = null
 
+// OpenStreetMap has no place=state nodes for Swiss cantons (unlike German Länder or Austrian
+// states), so the base style's label_state layer never has canton data to draw, at any zoom —
+// extending its zoom range (see regionLabels handling below) does nothing. Canton names instead
+// come from `cantonBorders` (own bundled boundary data, see scripts/fetch-canton-borders.ts) and
+// are drawn running along each canton's own border, always on regardless of zoom.
+
+// The vendor boundary source has no name for the CHE side of an international border either, but
+// it does carry adm0_l/adm0_r ISO3 country codes on admin_level=2 lines — enough to label the
+// neighboring country by a lookup, without needing our own bundled data for those.
+const NEIGHBOR_COUNTRY_NAMES: Record<string, string> = {
+  DEU: 'Deutschland',
+  AUT: 'Österreich',
+  ITA: 'Italien',
+  FRA: 'Frankreich',
+  LIE: 'Liechtenstein',
+}
+
 const LAYER_GROUPS: Partial<Record<keyof MapLayerVisibility, RegExp>> = {
   roads:
     /^(tunnel_(motorway|service|link|street|minor|secondary|tertiary|trunk|primary|path)|road_(area|motorway|service|link|minor|secondary|tertiary|trunk|primary|path|one_way)|bridge_(motorway|service|link|street|path|secondary|tertiary|trunk|primary)|highway-shield|road_shield)/,
@@ -146,6 +166,7 @@ const LAYER_GROUPS: Partial<Record<keyof MapLayerVisibility, RegExp>> = {
   poi: /^(poi_|airport)/,
   water: /^(water|waterway)/,
   landuse: /^(landuse_|landcover_|park)/,
+  nonSwissMask: /^switzerland-mask-layer$/,
 }
 
 function syncMapLayers() {
@@ -1207,14 +1228,14 @@ const shareModalPoints = computed<ShareModalPoint[]>(() => {
   return []
 })
 
-function shareModalUrl(): string | null {
+const shareModalUrl = computed<string | null>(() => {
   if (shareModalKind.value === 'bisect') return buildBisectShareUrl()
   if (shareModalKind.value === 'radius') return buildRadiusShareUrl()
   return null
-}
+})
 
 function copyShareModalUrl() {
-  const url = shareModalUrl()
+  const url = shareModalUrl.value
   if (!url) return
   navigator.clipboard.writeText(url)
   showToast('Share link copied', 'success')
@@ -1633,6 +1654,31 @@ onMounted(() => {
       },
     })
 
+    // Grey hatch overlay over everything that isn't Switzerland (switzerlandMask is a single
+    // world-rectangle-minus-Switzerland polygon — see scripts/fetch-canton-borders.ts). Added
+    // before the border/station layers so it sits underneath them.
+    const hatchCanvas = document.createElement('canvas')
+    hatchCanvas.width = 8
+    hatchCanvas.height = 8
+    const hatchCtx = hatchCanvas.getContext('2d')!
+    hatchCtx.strokeStyle = '#6b7280'
+    hatchCtx.lineWidth = 1
+    hatchCtx.beginPath()
+    hatchCtx.moveTo(0, 8)
+    hatchCtx.lineTo(8, 0)
+    hatchCtx.stroke()
+    map.addImage('non-switzerland-hatch', hatchCtx.getImageData(0, 0, 8, 8))
+    map.addSource('switzerland-mask', { type: 'geojson', data: switzerlandMask })
+    map.addLayer({
+      id: 'switzerland-mask-layer',
+      type: 'fill',
+      source: 'switzerland-mask',
+      paint: {
+        'fill-pattern': 'non-switzerland-hatch',
+        'fill-opacity': 0.55,
+      },
+    })
+
     // International/cantonal borders — read from the base style's own vector source
     // (OpenMapTiles schema: admin_level 2 = international, 4 = state/canton), styled distinctly
     // rather than reusing the vendor's own boundary_* layers. Always drawn (no visibility
@@ -1665,6 +1711,81 @@ onMounted(() => {
       paint: {
         'line-color': '#000',
         'line-width': 2.5,
+      },
+    })
+
+    // Canton names — own source (see cantonBorders above), one label repeated along each
+    // canton's own border line, oriented parallel to it, always on regardless of zoom. Named
+    // label_state_ch so it's picked up by the regionLabels group below and stays togglable
+    // alongside the vendor's (data-less, for Switzerland) label_state layer.
+    map.addSource('canton-borders', { type: 'geojson', data: cantonBorders })
+    map.addLayer({
+      id: 'label_state_ch',
+      type: 'symbol',
+      source: 'canton-borders',
+      layout: {
+        'text-field': ['get', 'name'],
+        'text-font': ['Noto Sans Italic'],
+        'text-letter-spacing': 0.2,
+        'text-size': 10,
+        'symbol-placement': 'line',
+        'symbol-spacing': 350,
+        'text-rotation-alignment': 'map',
+        'text-keep-upright': true,
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
+      },
+      paint: {
+        'text-color': '#333',
+        'text-halo-color': '#fff',
+        'text-halo-width': 1,
+        'text-halo-blur': 1,
+      },
+    })
+
+    // Country names along Switzerland's international border. The vendor boundary source has
+    // no name for admin_level 2 lines, only adm0_l/adm0_r ISO3 codes — pick whichever side isn't
+    // 'CHE' and look up its name. Named label_country_ch so it's picked up by the regionLabels
+    // group below, same as label_state_ch above.
+    const neighborCode: maplibregl.ExpressionSpecification = [
+      'case',
+      ['==', ['get', 'adm0_l'], 'CHE'],
+      ['get', 'adm0_r'],
+      ['get', 'adm0_l'],
+    ]
+    const neighborName = [
+      'match',
+      neighborCode,
+      ...Object.entries(NEIGHBOR_COUNTRY_NAMES).flat(),
+      '',
+    ] as unknown as maplibregl.ExpressionSpecification
+    map.addLayer({
+      id: 'label_country_ch',
+      type: 'symbol',
+      source: 'openmaptiles',
+      'source-layer': 'boundary',
+      filter: [
+        'all',
+        ['==', ['get', 'admin_level'], 2],
+        ['any', ['==', ['get', 'adm0_l'], 'CHE'], ['==', ['get', 'adm0_r'], 'CHE']],
+      ],
+      layout: {
+        'text-field': neighborName,
+        'text-font': ['Noto Sans Bold'],
+        'text-letter-spacing': 0.2,
+        'text-size': 10,
+        'symbol-placement': 'line',
+        'symbol-spacing': 350,
+        'text-rotation-alignment': 'map',
+        'text-keep-upright': true,
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
+      },
+      paint: {
+        'text-color': '#333',
+        'text-halo-color': '#fff',
+        'text-halo-width': 1,
+        'text-halo-blur': 1,
       },
     })
 
@@ -2277,6 +2398,7 @@ watch(userPosition, () => {
             </span>
             <button class="share-point-copy" @click="copySharePointCoords(point)">📋</button>
           </div>
+          <ShareQr v-if="shareModalUrl" :url="shareModalUrl" />
           <div class="modal-buttons">
             <button class="modal-btn cancel-btn" @click="shareModalKind = null">Close</button>
             <button class="modal-btn confirm-btn" @click="copyShareModalUrl">

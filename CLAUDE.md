@@ -74,3 +74,15 @@ Station line assignments are verified using the stationboard API. To re-run the 
    - Construction closures cause legitimate stations to return empty — don't remove them
    - GTFS data (gtfs.geops.ch) marks pass-throughs as stops — unreliable for line assignments
    - Stationboard is the ground truth for which lines serve a station
+
+### Canton borders & Switzerland outline
+
+`src/canton-borders.ts` and `src/switzerland-mask.ts` are generated, not hand-written — OSM has
+no `place=state` nodes for Swiss cantons, so the map draws its own canton/country border labels
+and the "outside Switzerland" hatch overlay from this bundled data instead of the vendor style.
+
+- Regenerate: `npx tsx scripts/fetch-canton-borders.ts && npm run format`
+- Source: the `swiss-maps` npm package (TopoJSON derived from swisstopo data), pinned to a
+  specific published version/year in the script
+- Canton names aren't in the data, only geometry ordered by the official BFS/swisstopo canton
+  number (1 Zürich … 26 Jura) — `CANTON_NAMES` in the script mirrors that order positionally

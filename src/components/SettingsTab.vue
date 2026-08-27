@@ -38,6 +38,7 @@ const mapLayerLabels: { key: keyof MapLayerVisibility; label: string }[] = [
   { key: 'poi', label: 'Points of interest' },
   { key: 'water', label: 'Water' },
   { key: 'landuse', label: 'Land use & parks' },
+  { key: 'nonSwissMask', label: 'Hatch overlay outside Switzerland' },
 ]
 
 function checkAll() {
