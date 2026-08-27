@@ -106,6 +106,9 @@ let map: maplibregl.Map | null = null
 let constraining = false
 let gpsMarker: maplibregl.Marker | null = null
 let zoneEdgeHandle: maplibregl.Marker | null = null
+// Angle (radians, 0 = due east) of the resize handle around the active zone's circumference —
+// tracks wherever the user last dragged it so the handle stays under their touch point.
+let zoneEdgeAngle = 0
 
 function haversineMeters(a: [number, number], b: [number, number]): number {
   const R = 6371000
@@ -376,6 +379,7 @@ function addZone(lngLat: [number, number]) {
   }
   zones.value.push(z)
   selectedZone.value = z.id
+  zoneEdgeAngle = 0
   updateZoneLayers()
   updateZoneEdgeHandle()
   persist()
@@ -643,6 +647,7 @@ function handleMapClick(e: maplibregl.MapMouseEvent) {
     if (id) {
       // Clicking a zone's center always re-opens its panel, even once saved/locked.
       selectedZone.value = selectedZone.value === id ? null : id
+      zoneEdgeAngle = 0
       updateZoneLayers()
       updateZoneEdgeHandle()
     }
@@ -652,6 +657,7 @@ function handleMapClick(e: maplibregl.MapMouseEvent) {
   // unsaved, so a saved zone can't be nudged by an accidental tap.
   if (activeZone.value && !activeZone.value.locked) {
     activeZone.value.center = [e.lngLat.lng, e.lngLat.lat]
+    zoneEdgeAngle = 0
     updateZoneLayers()
     updateZoneEdgeHandle()
     persist()
@@ -662,11 +668,25 @@ function handleMapClick(e: maplibregl.MapMouseEvent) {
   updateZoneEdgeHandle()
 }
 
-// Point due east of the zone's center at its current radius — the draggable handle that resizes
-// the zone without moving its center.
+// Angle (radians, 0 = east) from center to point, in the same equirectangular approximation
+// used for the edge point math below.
+function bearingAngle(center: [number, number], point: [number, number]): number {
+  const cosLat = Math.cos((center[1] * Math.PI) / 180)
+  const dx = (point[0] - center[0]) * cosLat
+  const dy = point[1] - center[1]
+  return Math.atan2(dy, dx)
+}
+
+// Point on the zone's circumference at the current handle angle — the draggable handle that
+// resizes the zone without moving its center. The angle tracks the user's last drag so the
+// handle sits at their touch point instead of snapping back to due east while resizing.
 function zoneEdgePoint(z: Zone): [number, number] {
   const dLngPerM = 1 / (111320 * Math.cos((z.center[1] * Math.PI) / 180))
-  return [z.center[0] + z.radiusM * dLngPerM, z.center[1]]
+  const dLatPerM = 1 / 111320
+  return [
+    z.center[0] + z.radiusM * Math.cos(zoneEdgeAngle) * dLngPerM,
+    z.center[1] + z.radiusM * Math.sin(zoneEdgeAngle) * dLatPerM,
+  ]
 }
 
 function createEdgeHandleEl(): HTMLDivElement {
@@ -681,6 +701,7 @@ function onZoneEdgeDrag() {
   if (!zoneEdgeHandle || !activeZone.value) return
   const { lng, lat } = zoneEdgeHandle.getLngLat()
   const radiusM = haversineMeters(activeZone.value.center, [lng, lat])
+  zoneEdgeAngle = bearingAngle(activeZone.value.center, [lng, lat])
   updateZoneRadius(activeZone.value.id, Math.max(10, Math.round(radiusM)))
 }
 

@@ -55,6 +55,9 @@ const radiusMode = ref(false)
 const radiusLocked = ref(false) // true when loaded from URL — read-only preview until Applied
 const radiusMeters = ref(5000)
 const radiusCenter = ref<[number, number] | null>(null)
+// Angle (radians, 0 = due east) of the resize handle around the circle's circumference —
+// tracks wherever the user last dragged it so the handle stays under their touch point.
+const radiusEdgeAngle = ref(0)
 const stationsInRadius = ref<Set<string>>(new Set())
 // Undo-capable apply toggle per side — reset whenever the circle's position/size changes (see
 // resetRadiusToolIds call sites).
@@ -398,12 +401,30 @@ function updateRadiusCenterMarker() {
   }
 }
 
-// Point due east of the circle's center at its current radius — the draggable handle that
-// resizes the circle without moving its center, same convention as the Endgame zone's edge
-// handle.
-function radiusEdgePoint(center: [number, number], radiusM: number): [number, number] {
+// Angle (radians, 0 = east) from center to point, in the same equirectangular approximation
+// used for the edge point math below.
+function bearingAngle(center: [number, number], point: [number, number]): number {
+  const cosLat = Math.cos((center[1] * Math.PI) / 180)
+  const dx = (point[0] - center[0]) * cosLat
+  const dy = point[1] - center[1]
+  return Math.atan2(dy, dx)
+}
+
+// Point on the circle's circumference at the given angle (0 = east) — the draggable handle
+// that resizes the circle without moving its center, same convention as the Endgame zone's
+// edge handle. The angle tracks the user's last drag so the handle sits at their touch point
+// instead of snapping back to due east while resizing.
+function radiusEdgePoint(
+  center: [number, number],
+  radiusM: number,
+  angle: number,
+): [number, number] {
   const dLngPerM = 1 / (111320 * Math.cos((center[1] * Math.PI) / 180))
-  return [center[0] + radiusM * dLngPerM, center[1]]
+  const dLatPerM = 1 / 111320
+  return [
+    center[0] + radiusM * Math.cos(angle) * dLngPerM,
+    center[1] + radiusM * Math.sin(angle) * dLatPerM,
+  ]
 }
 
 function createRadiusEdgeEl(): HTMLDivElement {
@@ -419,6 +440,7 @@ function onRadiusEdgeDrag() {
   const { lng, lat } = radiusEdgeMarker.getLngLat()
   const meters = haversineMeters(radiusCenter.value, [lng, lat])
   radiusMeters.value = Math.min(30000, Math.max(100, Math.round(meters)))
+  radiusEdgeAngle.value = bearingAngle(radiusCenter.value, [lng, lat])
   updateRadiusCircle()
 }
 
@@ -429,7 +451,7 @@ function updateRadiusEdgeMarker() {
     radiusEdgeMarker = null
     return
   }
-  const pos = radiusEdgePoint(radiusCenter.value, radiusMeters.value)
+  const pos = radiusEdgePoint(radiusCenter.value, radiusMeters.value, radiusEdgeAngle.value)
   if (!radiusEdgeMarker) {
     radiusEdgeMarker = new maplibregl.Marker({
       element: createRadiusEdgeEl(),
@@ -485,6 +507,7 @@ function handleMapClick(e: maplibregl.MapMouseEvent) {
   }
   if (!radiusMode.value || radiusLocked.value) return
   radiusCenter.value = point
+  radiusEdgeAngle.value = 0
   resetRadiusToolIds()
   updateRadiusCircle()
   // Refresh station layers to show golden hue
@@ -500,6 +523,7 @@ function resetRadiusToolIds() {
 function clearRadius() {
   clearRadiusUrlParam()
   radiusCenter.value = null
+  radiusEdgeAngle.value = 0
   radiusMode.value = false
   radiusLocked.value = false
   stationsInRadius.value = new Set()
@@ -604,7 +628,7 @@ function toggleRadiusLock() {
 // several can coexist, all drawn at once, each independently toggleable from history.
 function createDistancePointEl(color: string): HTMLDivElement {
   const el = document.createElement('div')
-  el.style.cssText = `width:18px;height:18px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:grab;touch-action:none;`
+  el.style.cssText = `width:30px;height:30px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:grab;touch-action:none;`
   return el
 }
 
@@ -2839,7 +2863,7 @@ watch(userPosition, () => {
 }
 
 .distance-preview {
-  font-size: 20px;
+  font-size: 30px;
   font-weight: 700;
   color: #7c3aed;
   text-align: center;
