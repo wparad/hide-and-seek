@@ -106,6 +106,7 @@ let map: maplibregl.Map | null = null
 let constraining = false
 let gpsMarker: maplibregl.Marker | null = null
 let zoneEdgeHandle: maplibregl.Marker | null = null
+const drawPreviewUrl = ref<string | null>(null)
 // Angle (radians, 0 = due east) of the resize handle around the active zone's circumference —
 // tracks wherever the user last dragged it so the handle stays under their touch point.
 let zoneEdgeAngle = 0
@@ -623,7 +624,8 @@ function saveDrawing() {
         a.href = url
         a.download = `${Math.floor(Date.now() / 1000)}.png`
         a.click()
-        URL.revokeObjectURL(url)
+        if (drawPreviewUrl.value) URL.revokeObjectURL(drawPreviewUrl.value)
+        drawPreviewUrl.value = url
         showToast('Drawing saved', 'success')
       } catch {
         showToast('Download failed', 'error')
@@ -632,6 +634,11 @@ function saveDrawing() {
   } catch {
     showToast('Could not export image', 'error')
   }
+}
+
+function closeDrawPreview() {
+  if (drawPreviewUrl.value) URL.revokeObjectURL(drawPreviewUrl.value)
+  drawPreviewUrl.value = null
 }
 
 function handleMapClick(e: maplibregl.MapMouseEvent) {
@@ -906,6 +913,7 @@ onUnmounted(() => {
   zoneEdgeHandle?.remove()
   map?.remove()
   map = null
+  if (drawPreviewUrl.value) URL.revokeObjectURL(drawPreviewUrl.value)
 })
 
 watch(selectedStation, () => {
@@ -1149,8 +1157,8 @@ const zoneRadiusLabel = computed(() => {
           <template v-if="drawMode">
             <button class="draw-btn" @click="clearDrawing">
               <svg
-                width="18"
-                height="18"
+                width="36"
+                height="36"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -1166,6 +1174,15 @@ const zoneRadiusLabel = computed(() => {
           </template>
         </div>
         <div v-if="placingMode" class="placing-hint">Tap map to place zone</div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="drawPreviewUrl" class="overlay" @click.self="closeDrawPreview">
+        <div class="modal draw-preview-modal">
+          <button class="draw-preview-close" @click="closeDrawPreview">✕</button>
+          <img :src="drawPreviewUrl" class="draw-preview-img" alt="Drawn line" />
+        </div>
       </div>
     </Teleport>
 
@@ -1494,12 +1511,12 @@ const zoneRadiusLabel = computed(() => {
 }
 
 .draw-toggle {
-  width: 40px;
-  height: 40px;
+  width: 80px;
+  height: 80px;
   border-radius: 50%;
   border: 1px solid #ddd;
   background: #fff;
-  font-size: 18px;
+  font-size: 36px;
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
   display: flex;
@@ -1513,12 +1530,12 @@ const zoneRadiusLabel = computed(() => {
 }
 
 .draw-btn {
-  width: 36px;
-  height: 36px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   border: 1px solid #ddd;
   background: #fff;
-  font-size: 16px;
+  font-size: 32px;
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   display: flex;
@@ -1578,6 +1595,36 @@ const zoneRadiusLabel = computed(() => {
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.draw-preview-modal {
+  position: relative;
+  background: #fff;
+  padding: 16px;
+  width: min(90vw, 90vh);
+}
+
+.draw-preview-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid #ddd;
+  background: #fff;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.draw-preview-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #fff;
+  border-radius: 4px;
 }
 
 .cancel-btn {
