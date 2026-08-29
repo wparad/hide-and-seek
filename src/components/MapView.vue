@@ -126,7 +126,7 @@ let radiusEdgeMarker: maplibregl.Marker | null = null
 const HANDLE_OFFSET_PX = 110
 
 // Share popup (bisect/radius) state
-const shareModalKind = ref<'bisect' | 'radius' | null>(null)
+const shareModalKind = ref<'bisect' | 'radius' | 'game' | null>(null)
 
 // Distance tool state
 const distanceMode = ref(false)
@@ -1318,6 +1318,10 @@ const shareModalPoints = computed<ShareModalPoint[]>(() => {
 const shareModalUrl = computed<string | null>(() => {
   if (shareModalKind.value === 'bisect') return buildBisectShareUrl()
   if (shareModalKind.value === 'radius') return buildRadiusShareUrl()
+  // "Share game" hands over the current page URL as-is — it already carries the full tool
+  // history via the ?t= param that syncUrl keeps in sync, so scanning it resumes this exact
+  // crossed-off state rather than a single tool's geometry.
+  if (shareModalKind.value === 'game') return window.location.href
   return null
 })
 
@@ -2350,6 +2354,9 @@ watch(userPosition, () => {
         >
           📏 Distance
         </button>
+        <button class="menu-item" @click="((shareModalKind = 'game'), (menuOpen = false))">
+          🔗 Share
+        </button>
         <button
           :class="['menu-item', { active: showHistory }]"
           @click="((showHistory = !showHistory), (menuOpen = false))"
@@ -2582,7 +2589,15 @@ watch(userPosition, () => {
     <Teleport to="body">
       <div v-if="shareModalKind" class="overlay" @click.self="shareModalKind = null">
         <div class="modal share-modal">
-          <p class="modal-text">Share {{ shareModalKind === 'bisect' ? 'bisect' : 'radius' }}</p>
+          <p class="modal-text">
+            {{
+              shareModalKind === 'bisect'
+                ? 'Share bisect'
+                : shareModalKind === 'radius'
+                  ? 'Share radius'
+                  : 'Share game'
+            }}
+          </p>
           <div v-for="point in shareModalPoints" :key="point.label" class="share-point-row">
             <span class="share-point-swatch" :style="{ background: point.color }"></span>
             <span class="share-point-label">{{ point.label }}</span>
