@@ -1366,8 +1366,11 @@ function updateGpsMarker() {
 }
 
 function clearScissor() {
-  // Just hide UI — don't reset saved state
+  // Back cancels the in-progress tool: clear its geometry (like clearRadius does for the radius
+  // tool) so reopening Bisect starts fresh instead of always resuming the last line. Any station
+  // already marked off via Mark hotter/colder lives on as its own history entry, untouched.
   clearBisectUrlParam()
+  localStorage.removeItem(SCISSOR_STORAGE_KEY)
   scissorEndpointA?.remove()
   scissorEndpointB?.remove()
   scissorHandle?.remove()
@@ -1384,7 +1387,11 @@ function clearScissor() {
   colderMarker = null
   scissorMode.value = false
   scissorLocked.value = false
+  scissorStart.value = null
+  scissorAngle.value = 90
+  scissorFlipped.value = false
   stationsOnScissorSide.value = new Set()
+  scissorStationSide.value = new Map()
   resetScissorToolIds()
   if (!map) return
   const lineSource = map.getSource('scissor-line') as maplibregl.GeoJSONSource | undefined
@@ -1708,17 +1715,47 @@ onMounted(() => {
       data: { type: 'FeatureCollection', features: [] },
     })
 
-    // hot = will be/was marked off (red), cold = stays (green) — same rule locked or unlocked.
+    // Fill always reflects the real, saved crossed-off status — never a tool preview. A radius/
+    // bisect tool only affects this once its Mark/Apply button has added a history entry.
     const statusColor: maplibregl.ExpressionSpecification = [
+      'match',
+      ['get', 'status'],
+      'available',
+      '#22c55e',
+      'crossed-off',
+      '#ef4444',
+      '#9ca3af',
+    ]
+
+    // Preview highlight border — shown only while a tool is actively previewing a selection,
+    // independent of the real (fill) status: yellow for "inside the radius circle", red/blue for
+    // bisect's hot (will be marked off) / cold (stays) sides.
+    const previewStrokeColor: maplibregl.ExpressionSpecification = [
       'case',
       ['==', ['get', 'scissorSide'], 'hot'],
       '#dc2626',
       ['==', ['get', 'scissorSide'], 'cold'],
-      '#22c55e',
+      '#3b82f6',
       ['==', ['get', 'inRadius'], 'yes'],
       '#f59e0b',
-      ['match', ['get', 'status'], 'available', '#22c55e', 'crossed-off', '#ef4444', '#9ca3af'],
+      ['match', ['get', 'status'], 'available', '#16a34a', 'crossed-off', '#dc2626', '#6b7280'],
     ]
+    const previewActive: maplibregl.ExpressionSpecification = [
+      'any',
+      ['==', ['get', 'scissorSide'], 'hot'],
+      ['==', ['get', 'scissorSide'], 'cold'],
+      ['==', ['get', 'inRadius'], 'yes'],
+    ]
+    const previewStrokeWidth: maplibregl.ExpressionSpecification = ['case', previewActive, 4, 1.5]
+    // Favorite stars keep their plain white halo outside of a preview — only tint it to the
+    // preview color while a tool is actively highlighting this station.
+    const favoriteHaloColor: maplibregl.ExpressionSpecification = [
+      'case',
+      previewActive,
+      previewStrokeColor,
+      '#fff',
+    ]
+    const favoriteHaloWidth: maplibregl.ExpressionSpecification = ['case', previewActive, 3, 1.5]
 
     map.addLayer({
       id: 'lines-layer',
@@ -1922,16 +1959,8 @@ onMounted(() => {
       paint: {
         'circle-radius': ['match', ['get', 'status'], 'filtered-out', 5, 8],
         'circle-color': statusColor,
-        'circle-stroke-width': 1.5,
-        'circle-stroke-color': [
-          'match',
-          ['get', 'status'],
-          'available',
-          '#16a34a',
-          'crossed-off',
-          '#dc2626',
-          '#6b7280',
-        ],
+        'circle-stroke-width': previewStrokeWidth,
+        'circle-stroke-color': previewStrokeColor,
         'circle-opacity': ['match', ['get', 'status'], 'filtered-out', 0.5, 1],
       },
     })
@@ -1968,8 +1997,8 @@ onMounted(() => {
       paint: {
         'text-color': statusColor,
         'text-opacity': ['match', ['get', 'status'], 'filtered-out', 0.5, 1],
-        'text-halo-color': '#fff',
-        'text-halo-width': 1.5,
+        'text-halo-color': favoriteHaloColor,
+        'text-halo-width': favoriteHaloWidth,
       },
     })
 
