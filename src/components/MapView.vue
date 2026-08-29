@@ -169,11 +169,14 @@ const LAYER_GROUPS: Partial<Record<keyof MapLayerVisibility, RegExp>> = {
   rail: /^(tunnel_(major_rail|transit_rail)|road_(major_rail|transit_rail)|bridge_(major_rail|transit_rail))/,
   // label_state = canton names, label_country_1/2/3 = country names — carved out into their own
   // `regionLabels` group below so they can be shown independently of every other label type.
-  labels: /^(label_(?!state|country_)|waterway_line_label|water_name_|highway-name)/,
+  // Named lake/river labels (water_name_/waterway_line_label) are deliberately excluded from
+  // every group below — orientation landmarks that stay on regardless of the roads or water
+  // toggles, same as the always-drawn cantonal/international borders.
+  labels: /^(label_(?!state|country_)|highway-name)/,
   regionLabels: /^label_(state|country_)/,
   buildings: /^building/,
   poi: /^(poi_|airport)/,
-  water: /^(water|waterway)/,
+  water: /^(?!water_name_|waterway_line_label)(water|waterway)/,
   landuse: /^(landuse_|landcover_|park)/,
   nonSwissMask: /^switzerland-mask-layer$/,
 }
@@ -1742,12 +1745,20 @@ onMounted(() => {
 
     // Preview highlight border — shown only while a tool is actively previewing a selection,
     // independent of the real (fill) status: yellow for "inside the radius circle", red/blue for
-    // bisect's hot (will be marked off) / cold (stays) sides.
+    // bisect's hot (will be marked off) / cold (stays) sides. The bisect side is skipped for a
+    // station that's already crossed off — its status stroke already reads as marked off, so a
+    // hot/cold outline on top of that would be redundant/misleading.
+    const bisectPreviewSide: maplibregl.ExpressionSpecification = [
+      'case',
+      ['==', ['get', 'status'], 'crossed-off'],
+      'none',
+      ['get', 'scissorSide'],
+    ]
     const previewStrokeColor: maplibregl.ExpressionSpecification = [
       'case',
-      ['==', ['get', 'scissorSide'], 'hot'],
+      ['==', bisectPreviewSide, 'hot'],
       '#dc2626',
-      ['==', ['get', 'scissorSide'], 'cold'],
+      ['==', bisectPreviewSide, 'cold'],
       '#3b82f6',
       ['==', ['get', 'inRadius'], 'yes'],
       '#f59e0b',
@@ -1755,8 +1766,8 @@ onMounted(() => {
     ]
     const previewActive: maplibregl.ExpressionSpecification = [
       'any',
-      ['==', ['get', 'scissorSide'], 'hot'],
-      ['==', ['get', 'scissorSide'], 'cold'],
+      ['==', bisectPreviewSide, 'hot'],
+      ['==', bisectPreviewSide, 'cold'],
       ['==', ['get', 'inRadius'], 'yes'],
     ]
     const previewStrokeWidth: maplibregl.ExpressionSpecification = ['case', previewActive, 4, 1.5]
