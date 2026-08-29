@@ -54,6 +54,7 @@ const reasonText = ref('')
 const radiusMode = ref(false)
 const radiusLocked = ref(false) // true when loaded from URL — read-only preview until Applied
 const radiusMeters = ref(5000)
+const RADIUS_STEP = 100
 const radiusCenter = ref<[number, number] | null>(null)
 // Angle (radians, 0 = due east) of the resize handle around the circle's circumference —
 // tracks wherever the user last dragged it so the handle stays under their touch point.
@@ -78,6 +79,7 @@ const scissorAngle = ref(90) // degrees, direction from start toward the end poi
 const scissorDistance = ref(500) // meters — fixed start→end distance
 const scissorFlipped = ref(false)
 const SCISSOR_DISTANCES = [500, 1000, 2000, 3000, 4000, 5000, 15000]
+const SCISSOR_ANGLE_STEP = 5
 const stationsOnScissorSide = ref<Set<string>>(new Set())
 // Colour every station by which side of the bisect it's on:
 // 'hot' (toward the end/red endpoint — will be/was marked off) or 'cold' (toward start/green — stays).
@@ -621,6 +623,11 @@ function toggleRadiusLock() {
   radiusLocked.value = !radiusLocked.value
   if (!radiusLocked.value) clearRadiusUrlParam()
   updateRadiusCircle()
+}
+
+// Step buttons next to the slider — same clamping as the slider's own min/max.
+function adjustRadius(deltaMeters: number) {
+  radiusMeters.value = Math.min(30000, Math.max(100, radiusMeters.value + deltaMeters))
 }
 
 // Distance tool: place point A then point B, straight-line distance between them. Each finalized
@@ -1322,6 +1329,12 @@ function copySharePointCoords(point: ShareModalPoint) {
   const [lng, lat] = point.coords
   navigator.clipboard.writeText(`${lat.toFixed(6)},${lng.toFixed(6)}`)
   showToast('Coordinates copied', 'success')
+}
+
+// Step buttons at the top of the panel — same fixed-degree nudge either direction, wrapping
+// around 0/360 like the drag handle does.
+function rotateScissor(deltaDegrees: number) {
+  scissorAngle.value = (scissorAngle.value + deltaDegrees + 360) % 360
 }
 
 // Swaps which physical point is start vs end: newStart = oldEnd, newAngle = angle + 180.
@@ -2378,14 +2391,30 @@ watch(userPosition, () => {
           </span>
         </div>
       </div>
-      <input
-        v-model.number="radiusMeters"
-        type="range"
-        :min="100"
-        :max="30000"
-        :step="100"
-        class="radius-slider"
-      />
+      <div class="radius-slider-row">
+        <button
+          class="radius-step-btn"
+          aria-label="Decrease radius"
+          @click="adjustRadius(-RADIUS_STEP)"
+        >
+          −
+        </button>
+        <input
+          v-model.number="radiusMeters"
+          type="range"
+          :min="100"
+          :max="30000"
+          :step="100"
+          class="radius-slider"
+        />
+        <button
+          class="radius-step-btn"
+          aria-label="Increase radius"
+          @click="adjustRadius(RADIUS_STEP)"
+        >
+          +
+        </button>
+      </div>
       <div class="radius-hint">
         {{
           radiusLocked
@@ -2439,6 +2468,24 @@ watch(userPosition, () => {
             apart
           </span>
         </div>
+      </div>
+      <div v-if="scissorCenter && !scissorLocked" class="scissor-rotate-row">
+        <span class="scissor-rotate-label">Rotate</span>
+        <button
+          class="scissor-step-btn"
+          aria-label="Rotate counter-clockwise"
+          @click="rotateScissor(-SCISSOR_ANGLE_STEP)"
+        >
+          ↺
+        </button>
+        <span class="scissor-angle-label">{{ Math.round(scissorAngle) }}°</span>
+        <button
+          class="scissor-step-btn"
+          aria-label="Rotate clockwise"
+          @click="rotateScissor(SCISSOR_ANGLE_STEP)"
+        >
+          ↻
+        </button>
       </div>
       <div v-if="!scissorLocked" class="scissor-controls">
         <label class="scissor-field">
@@ -2765,11 +2812,37 @@ watch(userPosition, () => {
   color: #f59e0b;
 }
 
+.radius-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 60%;
+  margin: 4px auto;
+}
+
 .radius-slider {
   display: block;
-  width: 50%;
-  margin: 4px auto;
+  flex: 1;
+  margin: 0;
   accent-color: #f59e0b;
+}
+
+.radius-step-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  line-height: 1;
+  font-size: 16px;
+  font-weight: 700;
+  border-radius: 50%;
+  border: 1px solid #d1d5db;
+  background: #f3f4f6;
+  color: #111827;
+  cursor: pointer;
+}
+
+.radius-step-btn:active {
+  background: #e5e7eb;
 }
 
 .radius-hint {
@@ -3087,6 +3160,45 @@ watch(userPosition, () => {
 .scissor-distance-label {
   font-weight: 400;
   color: #8b5cf6;
+}
+
+.scissor-rotate-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.scissor-rotate-label {
+  font-size: 12px;
+  color: #666;
+}
+
+.scissor-angle-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b5cf6;
+  min-width: 32px;
+  text-align: center;
+}
+
+.scissor-step-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  line-height: 1;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 50%;
+  border: 1px solid #d1d5db;
+  background: #f3f4f6;
+  color: #111827;
+  cursor: pointer;
+}
+
+.scissor-step-btn:active {
+  background: #e5e7eb;
 }
 
 .scissor-controls {
